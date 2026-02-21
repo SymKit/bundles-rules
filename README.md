@@ -32,8 +32,8 @@ Les skills sont globaux et disponibles dans tous vos projets Cursor.
 cp -r skills/symfony-bundle-core     .cursor/skills/symfony-bundle-core
 cp -r skills/symfony-bundle-ux       .cursor/skills/symfony-bundle-ux
 cp -r skills/symfony-bundle-doctrine .cursor/skills/symfony-bundle-doctrine
-cp -r skills/symfony-bundle-flex     .cursor/skills/symfony-bundle-flex
 cp -r skills/symfony-bundle-quality  .cursor/skills/symfony-bundle-quality
+cp -r skills/symfony-bundle-flex     .cursor/skills/symfony-bundle-flex
 ```
 
 Ou en une commande :
