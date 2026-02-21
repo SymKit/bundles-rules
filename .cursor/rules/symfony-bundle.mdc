@@ -62,6 +62,10 @@ alwaysApply: true
 - Hardcoded parameters instead of `configure()` + env vars
 - Symfony constraints `7.*|8.*` instead of `^7.0 || ^8.0`
 
+## Commits
+
+When committing, never reference the agent or any co-author (no "trailer", Co-authored-by, Signed-off-by from the AI, or similar). Commit messages and metadata must describe only the change, with no self-attribution.
+
 ## After Every Change — Makefile First
 
 Always use Makefile targets. Never call `vendor/bin/` directly.
