@@ -46,6 +46,12 @@ alwaysApply: true
 - `translations/` at bundle root for XLIFF files (auto-discovered by Symfony)
 - Never extend `AbstractController` — inject specific services
 
+## Services (contexte bundle)
+
+- Dans un bundle, **ne pas utiliser les attributs** pour déclarer les services (tags, listeners, composants Twig, etc.).
+- Tout enregistrement de services, tags et options doit se faire **en configuration** : dans `loadExtension()` du bundle (AbstractBundle) ou dans les fichiers XML de définition de services.
+- Exemples à éviter dans le code du bundle : `#[AsEventListener]`, `#[AsTwigComponent]`, `#[AsLiveComponent]`, tags sur les classes. À la place : appels à `$container->register()`, `->addTag()`, et déclarations explicites dans l’extension ou le XML.
+
 ## Dependencies
 
 - Symfony packages: always `^7.0 || ^8.0` (semver, never `7.*|8.*`)
@@ -56,6 +62,7 @@ alwaysApply: true
 ## Anti-Patterns
 
 - Using `Bundle` instead of `AbstractBundle` with separate Extension/Configuration classes
+- **Using attributes for service/tag registration in bundle code** — use config/loadExtension() instead
 - `new Configuration()` or `new Service()` — always use DI or AbstractBundle built-in methods
 - Public services by default, missing service ID prefix, YAML services
 - Setter injection, business logic in controller/entity
@@ -85,3 +92,4 @@ Always use Makefile targets. Never call `vendor/bin/` directly.
 - `symfony-bundle-doctrine`: entities, XML mapping
 - `symfony-bundle-flex`: Flex recipes
 - `symfony-bundle-quality`: Makefile, PHPStan, GrumPHP, Infection, Deptrac, CI
+
