@@ -60,13 +60,15 @@ Always configure in `composer.json`:
 
 ## Infection
 
-- MSI >= 70%, `--only-covered`, threads max
+- MSI >= 70% (or 65% with documented justification, e.g. mutants escaping scope such as prependExtension path)
+- `--only-covered`, threads max
 - Always run after `make test`
 
 ## CI (GitHub Actions)
 
-- 6 jobs: security, cs, phpstan, deptrac in parallel → tests (matrix PHP 8.2-8.4 × Symfony 7+8) → infection
-- Matrix excludes: `{ php: '8.2', symfony: '8.0.*' }`
+- Either run `make ci` (includes lint), or replicate as separate jobs: security, cs, phpstan, deptrac in parallel → tests (matrix PHP 8.2-8.4 × Symfony 7+8) → infection
+- Matrix: use explicit Symfony versions (e.g. `7.1.*`, `7.2.*`, `8.0.*`). Exclusions can be multiple (e.g. `{ php: '8.2', symfony: '8.0.*' }`, `{ php: '8.3', symfony: '8.0.*' }`) depending on PHP/Symfony compatibility
+- If using separate jobs: include **lint** (e.g. in the cs job) or omit when the bundle has no `config/*.xml` (lint is then no-op)
 - `fail-fast: false` on test matrix
 - Symfony deps: always `^7.0 || ^8.0`
 
@@ -83,6 +85,7 @@ infection.log
 infection-summary.log
 phpunit.xml
 phpstan.neon
+*.log
 ```
 
 ## Anti-Patterns

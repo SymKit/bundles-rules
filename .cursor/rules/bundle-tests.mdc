@@ -9,7 +9,8 @@ alwaysApply: false
 ## General
 
 - `declare(strict_types=1)` in test files too
-- Structure: `tests/Unit/`, `tests/Integration/`, `tests/Functional/`
+- Structure: `tests/Unit/`, `tests/Integration/`, `tests/Functional/` when applicable; for small bundles a lighter layout is fine (e.g. only `tests/Integration/`)
+- PHPUnit testsuite name in `phpunit.xml.dist` can stay generic (e.g. "Unit") even if test classes live under `Integration/`
 - Use `nyholm/symfony-bundle-test` with `TestKernel` for integration tests
 
 ## Minimum Required Tests

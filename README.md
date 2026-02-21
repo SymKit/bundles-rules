@@ -11,7 +11,7 @@ Fournit **7 rules projet** (portables, a copier dans chaque bundle) et **5 skill
 - `declare(strict_types=1)` partout, fonctions natives prefixees (`\count()`, `\sprintf()`)
 - PHPStan level 9, PHP-CS-Fixer `@Symfony`, Deptrac pour l'architecture
 - Compatibilite Symfony 7 + 8 (`^7.0 || ^8.0`)
-- GrumPHP (pre-commit hooks), Infection (mutation testing), `composer audit`
+- GrumPHP (pre-commit hooks: phpstan, cs-fixer, phpunit), Infection (mutation testing); security audit via `make security-check` or CI (not a GrumPHP task)
 - GitHub Actions CI : matrice PHP 8.2-8.4 x Symfony 7+8, 6 jobs paralleles
 - AssetMapper + Stimulus : `stimulusFetch: 'lazy'`, Twig helpers obligatoires, pas de jQuery/npm
 - Live Components : securite `LiveProp`, `debounce`, stable `id` dans les boucles
@@ -151,7 +151,7 @@ make ci               # Pipeline CI (security + quality)
 - **PHP-CS-Fixer** : `@Symfony`, `declare_strict_types`, native function prefix, trailing comma
 - **Deptrac** : Entity ne depend de rien, Service pas de Controller, Contract pas d'interne
 - **Infection** : MSI >= 70%, `--only-covered`
-- **GrumPHP** : pre-commit hooks (phpstan, cs-fixer, phpunit, composer audit)
+- **GrumPHP** : pre-commit hooks (phpstan, cs-fixer, phpunit). Security check via `make security-check` or in CI — `composer_audit` is not a valid GrumPHP task
 
 ### Compatibilite
 
