@@ -1,0 +1,352 @@
+---
+name: symfony-bundle-quality
+description: "Configure quality assurance tooling for Symfony bundles: Makefile, Deptrac architecture enforcement, GrumPHP pre-commit hooks, PHPStan level 9, PHP-CS-Fixer strict @Symfony, Infection mutation testing, composer audit security checks, GitHub Actions CI for Symfony 7+8. Trigger when: 'quality', 'CI', 'makefile', 'deptrac', 'phpstan', 'grumphp', 'infection', 'composer audit', 'security check', 'coding standards', 'architecture', 'publish bundle', 'open source bundle'."
+---
+
+# Symfony Bundle Quality — Tooling & CI
+
+This skill covers the complete quality assurance pipeline for distributable Symfony bundles.
+
+---
+
+## 1. Makefile (Single Entry Point)
+
+```makefile
+.PHONY: help install test phpstan cs-fix cs-check infection deptrac quality security-check lint ci
+
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+install: ## Install dependencies
+	composer install
+
+test: ## Run PHPUnit tests
+	vendor/bin/phpunit
+
+phpstan: ## Static analysis (level 9)
+	vendor/bin/phpstan analyse --memory-limit=512M
+
+cs-fix: ## Fix code style
+	vendor/bin/php-cs-fixer fix
+
+cs-check: ## Check code style (no fix)
+	vendor/bin/php-cs-fixer fix --dry-run --diff
+
+infection: ## Mutation testing
+	vendor/bin/infection --only-covered --show-mutations --threads=max --min-msi=70
+
+deptrac: ## Architecture enforcement
+	vendor/bin/deptrac analyse
+
+security-check: ## Dependency security audit
+	composer audit
+
+lint: ## Lint config files
+	@test -f bin/console && php bin/console lint:yaml config/ --parse-tags 2>/dev/null || true
+	@test -f bin/console && php bin/console lint:xliff translations/ 2>/dev/null || true
+	@test -d config && find config -name '*.xml' -exec xmllint --noout {} + 2>/dev/null || true
+
+quality: cs-check phpstan deptrac lint test infection ## Full quality pipeline
+
+ci: security-check quality ## Full CI pipeline (security + quality)
+```
+
+Always use `make quality` after every significant change. Never commit code that fails.
+
+---
+
+## 2. PHPStan Level 9
+
+### Configuration (`phpstan.neon.dist`)
+
+```neon
+parameters:
+    level: 9
+    paths:
+        - src/
+    tmpDir: .phpstan-cache
+```
+
+### Rules
+
+- Type everything: parameters, return types, properties. No implicit `void`.
+- No `mixed` except justified with a comment explaining why.
+- No `@phpstan-ignore` without an explanatory comment.
+- Doctrine collections: `/** @var Collection<int, Entity> */`
+- Repository methods: `@return Entity[]` or exact union type, never `mixed[]`
+- Custom PHPStan rules can enforce naming conventions (ADRs).
+- After every change: `make phpstan`
+
+---
+
+## 3. PHP-CS-Fixer
+
+### Configuration (`.php-cs-fixer.dist.php`)
+
+```php
+<?php
+
+declare(strict_types=1);
+
+$finder = (new PhpCsFixer\Finder())
+    ->in(__DIR__ . '/src')
+    ->in(__DIR__ . '/tests')
+;
+
+return (new PhpCsFixer\Config())
+    ->setRules([
+        '@Symfony' => true,
+        '@PHP82Migration' => true,
+        'declare_strict_types' => true,
+        'native_function_invocation' => [
+            'include' => ['@compiler_optimized'],
+            'scope' => 'namespaced',
+            'strict' => true,
+        ],
+        'trailing_comma_in_multiline' => [
+            'elements' => ['arguments', 'parameters', 'match', 'arrays'],
+        ],
+        'ordered_imports' => ['sort_algorithm' => 'alpha'],
+        'no_unused_imports' => true,
+        'global_namespace_import' => [
+            'import_classes' => true,
+            'import_functions' => false,
+            'import_constants' => false,
+        ],
+    ])
+    ->setFinder($finder)
+    ->setRiskyAllowed(true)
+;
+```
+
+After every change: `make cs-fix`
+
+---
+
+## 4. GrumPHP
+
+### Configuration (`grumphp.yml`)
+
+```yaml
+grumphp:
+    tasks:
+        phpstan:
+            config: phpstan.neon.dist
+            memory_limit: 512M
+        phpcsfixer:
+            config: .php-cs-fixer.dist.php
+        phpunit:
+            config: phpunit.xml.dist
+        composer_audit: ~
+```
+
+Pre-commit hooks prevent non-conforming commits.
+
+---
+
+## 5. Infection (Mutation Testing)
+
+### Configuration (`infection.json5`)
+
+```json5
+{
+    "$schema": "https://raw.githubusercontent.com/infection/infection/0.29.0/resources/schema.json",
+    "source": { "directories": ["src/"] },
+    "logs": {
+        "text": "infection.log",
+        "summary": "infection-summary.log"
+    },
+    "minMsi": 70,
+    "minCoveredMsi": 80,
+    "threads": "max",
+    "testFramework": "phpunit",
+    "testFrameworkOptions": "--testsuite=Unit"
+}
+```
+
+Run: `make infection` (requires xdebug or pcov for coverage).
+
+---
+
+## 6. Deptrac (Architecture Enforcement)
+
+### Configuration (`deptrac.yaml`)
+
+```yaml
+deptrac:
+    paths:
+        - ./src
+    layers:
+        - name: Contract
+          collectors:
+            - type: directory
+              value: src/Contract/.*
+        - name: Entity
+          collectors:
+            - type: directory
+              value: src/Entity/.*
+        - name: Event
+          collectors:
+            - type: directory
+              value: src/Event/.*
+        - name: Repository
+          collectors:
+            - type: directory
+              value: src/Repository/.*
+        - name: Service
+          collectors:
+            - type: directory
+              value: src/Service/.*
+        - name: Controller
+          collectors:
+            - type: directory
+              value: src/Controller/.*
+        - name: DependencyInjection
+          collectors:
+            - type: directory
+              value: src/DependencyInjection/.*
+    ruleset:
+        Contract: []
+        Entity: [Contract]
+        Event: [Contract, Entity]
+        Repository: [Contract, Entity]
+        Service: [Contract, Entity, Repository, Event]
+        Controller: [Contract, Service, Entity]
+        DependencyInjection: [Contract, Service, Entity, Repository, Event, Controller]
+```
+
+Rules: Entity depends on nothing (or Contract). Service never imports Controller. Contract imports nothing internal.
+
+---
+
+## 7. Security
+
+`composer audit` in Makefile, CI, and GrumPHP. Replaces the deprecated `symfony check:security`.
+
+---
+
+## 8. GitHub Actions CI
+
+```yaml
+name: CI
+on: [push, pull_request]
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with: { php-version: '8.3' }
+      - run: composer install --no-progress
+      - run: composer audit
+
+  cs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with: { php-version: '8.3' }
+      - run: composer install --no-progress
+      - run: make cs-check
+
+  phpstan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with: { php-version: '8.3' }
+      - run: composer install --no-progress
+      - run: make phpstan
+
+  deptrac:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with: { php-version: '8.3' }
+      - run: composer install --no-progress
+      - run: make deptrac
+
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.2', '8.3', '8.4']
+        symfony: ['7.1.*', '7.2.*', '8.0.*']
+        exclude:
+          - { php: '8.2', symfony: '8.0.*' }
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with: { php-version: '${{ matrix.php }}', coverage: xdebug }
+      - run: |
+          composer require --no-update symfony/framework-bundle:${{ matrix.symfony }}
+          composer update --prefer-dist --no-progress
+      - run: make test
+
+  infection:
+    runs-on: ubuntu-latest
+    needs: tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with: { php-version: '8.3', coverage: xdebug }
+      - run: composer install --no-progress
+      - run: make infection
+```
+
+6 parallel jobs: security, cs, phpstan, deptrac. Then tests (matrix). Then infection.
+
+---
+
+## 9. .editorconfig
+
+```ini
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.php]
+indent_style = space
+indent_size = 4
+
+[*.{yaml,yml,json,js,ts,css}]
+indent_style = space
+indent_size = 2
+
+[*.xml]
+indent_style = space
+indent_size = 4
+
+[Makefile]
+indent_style = tab
+```
+
+---
+
+## 10. README Badges
+
+```markdown
+[![CI](https://github.com/VENDOR/BUNDLE/actions/workflows/ci.yml/badge.svg)](https://github.com/VENDOR/BUNDLE/actions)
+[![Latest Version](https://img.shields.io/packagist/v/vendor/bundle.svg)](https://packagist.org/packages/vendor/bundle)
+[![PHPStan Level 9](https://img.shields.io/badge/PHPStan-level%209-brightgreen.svg)](https://phpstan.org/)
+```
+
+---
+
+## 11. Anti-Patterns
+
+| Anti-Pattern | Impact |
+|---|---|
+| `phpstan.neon` instead of `.dist` | Overridden by local config, inconsistent CI |
+| `@phpstan-ignore` without comment | Masks real problems |
+| MSI < 50% | Tests don't actually verify behavior |
+| Ignoring deprecations until upgrade | Debt accumulation |
+| Committing code failing `make quality` | Broken CI for all contributors |
+| No `composer audit` in CI | Vulnerable dependencies shipped |
+| No Deptrac | Architecture erodes over time |

@@ -1,0 +1,62 @@
+---
+description: Testing patterns for Symfony bundle test suites
+globs: tests/**/*.php
+alwaysApply: false
+---
+
+# Bundle Test Conventions
+
+## General
+
+- `declare(strict_types=1)` in test files too
+- Structure: `tests/Unit/`, `tests/Integration/`, `tests/Functional/`
+- Use `nyholm/symfony-bundle-test` with `TestKernel` for integration tests
+
+## Minimum Required Tests
+
+- Bundle boots without error
+- All services are correctly registered and wired
+- Configuration validation (required keys, invalid values)
+
+## Integration Test Template
+
+```php
+use Nyholm\BundleTest\TestKernel;
+use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+
+protected static function getKernelClass(): string
+{
+    return TestKernel::class;
+}
+
+protected static function createKernel(array $options = []): KernelInterface
+{
+    $kernel = parent::createKernel($options);
+    $kernel->addTestBundle(AcmeBlogBundle::class);
+    $kernel->addTestConfig(function ($container) {
+        $container->loadFromExtension('acme_blog', ['api_key' => 'test']);
+    });
+    $kernel->handleOptions($options);
+    return $kernel;
+}
+```
+
+## Live Components
+
+Test with `InteractsWithLiveComponents` trait in `KernelTestCase`:
+
+```php
+use Symfony\UX\LiveComponent\Test\InteractsWithLiveComponents;
+
+$component = $this->createLiveComponent(name: SearchLive::class, data: ['query' => 'test']);
+$component->call('loadMore');
+self::assertSame(2, $component->component()->page);
+```
+
+## Twig Components
+
+Test rendering via Twig render assertions or by checking rendered HTML output.
+
+## After Every Change
+
+Run `make test` then `make infection` to verify coverage and mutation score.

@@ -1,0 +1,62 @@
+---
+description: Symfony bundle conventions, SOLID principles, Contract pattern, final readonly architecture
+alwaysApply: true
+---
+
+# Symfony Bundle Conventions
+
+## Architecture
+
+- `final readonly class` for all services, handlers, processors, voters, listeners, DTOs
+- Exceptions: Doctrine entities (not `readonly`), bundle class (not `final`), classes documented for inheritance
+- Extension points: interfaces, events, compiler passes, decorators — never inheritance
+
+## SOLID
+
+- **S**: One class, one responsibility. No "god service".
+- **O**: Extensible via events/interfaces/decorators. `final readonly` forces composition.
+- **L**: Interfaces are substitutable. No `instanceof` on concrete implementations.
+- **I**: Segregated interfaces. One interface = one precise contract.
+- **D**: Inject interfaces, never concrete implementations.
+
+## Contract Pattern
+
+- `src/Contract/`: public interfaces of the bundle (BC-safe API)
+- Services implement Contract interfaces. Host app type-hints on interfaces.
+- Only `Contract/`, events, and DTOs are part of the public semver API.
+
+## Naming
+
+- Bundle class: `{Vendor}{Name}Bundle`, namespace `{Vendor}\{Name}Bundle`
+- Config alias (auto-derived, snake_case): service prefix `alias.`, route prefix `alias_`
+- Translation domain: `{Vendor}{Name}Bundle` in XLIFF
+
+## Structure
+
+- `src/Contract/`, `src/Event/`, `src/DependencyInjection/CompilerPass/` always present
+- XML for service definitions (no Yaml dependency). Defaults: `autowire=true autoconfigure=true public=false`
+- Never extend `AbstractController` — inject specific services
+
+## Dependencies
+
+- Symfony packages: always `^7.0 || ^8.0`
+- Only declare actual dependencies. Optional deps in `suggest`.
+- Never embed vendor code in `src/`
+
+## Anti-Patterns
+
+- Public services by default, missing service ID prefix, YAML services
+- `new Service()`, setter injection, business logic in controller/entity
+- Hardcoded parameters instead of `configure()` + env vars
+
+## After Every Change
+
+Run `make quality` to validate code style, static analysis, architecture, tests, and mutations.
+
+## Available Skills
+
+- `symfony-bundle-core`: architecture, scaffolding
+- `symfony-bundle-ux`: AssetMapper, Stimulus, Twig/Live Components
+- `symfony-bundle-doctrine`: entities, XML mapping
+- `symfony-bundle-flex`: Flex recipes
+- `symfony-bundle-quality`: Makefile, PHPStan, GrumPHP, Infection, Deptrac, CI

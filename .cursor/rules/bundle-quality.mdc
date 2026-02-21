@@ -1,0 +1,61 @@
+---
+description: Quality tooling configuration and CI pipeline for Symfony bundles
+globs: Makefile, grumphp.yml, phpstan.neon.dist, .php-cs-fixer.dist.php, infection.json5, deptrac.yaml, .github/**/*.yml
+alwaysApply: false
+---
+
+# Bundle Quality Tooling
+
+## Pipeline
+
+- `make quality` = cs-check + phpstan + deptrac + lint + test + infection
+- `make security-check` = composer audit
+- `make ci` = security-check + quality
+- Never commit code that fails `make quality`
+
+## PHPStan Level 9
+
+- No `@phpstan-ignore` without explanatory comment
+- No `mixed` without justification
+- Typed collections: `/** @var Collection<int, Entity> */`
+- Typed repository returns: `@return Entity[]`
+
+## PHP-CS-Fixer
+
+- `@Symfony` + `@PHP82Migration`
+- `declare_strict_types` enforced
+- `native_function_invocation` with `@compiler_optimized`
+- `trailing_comma_in_multiline` on arguments, parameters, match, arrays
+- `ordered_imports` alphabetical
+- Always use `.php-cs-fixer.dist.php` (not `.php-cs-fixer.php`)
+
+## GrumPHP
+
+Pre-commit hooks: phpstan, phpcsfixer, phpunit, composer_audit.
+
+## Deptrac
+
+- Entity depends on nothing (or Contract)
+- Service never imports Controller
+- Contract imports nothing internal
+- Controller goes through Service, not Repository directly
+
+## Infection
+
+- MSI >= 70%, `--only-covered`, threads max
+- Always run after `make test`
+
+## CI (GitHub Actions)
+
+- 6 jobs: security, cs, phpstan, deptrac in parallel → tests (matrix PHP 8.2-8.4 × Symfony 7+8) → infection
+- Matrix excludes: `{ php: '8.2', symfony: '8.0.*' }`
+- `fail-fast: false` on test matrix
+- Symfony deps: always `^7.0 || ^8.0`
+
+## Anti-Patterns
+
+- `phpstan.neon` instead of `.dist` (overridden locally)
+- MSI < 50% (tests don't verify behavior)
+- Ignoring deprecations
+- No `composer audit` in CI
+- No Deptrac (architecture erodes)

@@ -1,0 +1,46 @@
+---
+description: Strict PHP code style for Symfony bundle source code
+globs: src/**/*.php
+alwaysApply: false
+---
+
+# PHP Bundle Code Style
+
+## Mandatory Header
+
+Every PHP file starts with `declare(strict_types=1)`.
+
+## Classes
+
+- `final readonly class` for: services, handlers, processors, voters, listeners, DTOs
+- Exceptions: Doctrine entities (not `readonly`), bundle class (not `final`), documented inheritance
+- Constructor injection only with promoted properties (`private readonly`)
+
+## Typing
+
+- All parameters, return types, and properties must be typed
+- No `mixed` except with a comment justifying why
+- Doctrine collections: `/** @var Collection<int, Entity> */`
+- Repository returns: `@return Entity[]` or exact union type, never `mixed[]`
+
+## Language Features
+
+- PHP 8 attributes: `#[Route]`, `#[AsEventListener]`, `#[AutoconfigureTag]`. Never `@annotations`.
+- Native function prefix: `\count()`, `\sprintf()`, `\in_array()`, `\array_map()`
+- `match` over `switch` when applicable
+- Early return to reduce nesting
+
+## Dependency Injection
+
+- Constructor injection only. No setter, no property injection.
+- Never `new Service()` — always DI
+- No hardcoded parameters — use `configure()` + env vars
+- Prefix service IDs and interface aliases with bundle alias
+- `registerForAutoconfiguration()` for custom interfaces
+
+## Forbidden
+
+- Business logic in controllers or entities
+- `@phpstan-ignore` without explanatory comment
+- Implicit `void` return types
+- Anonymous classes for services (untestable)

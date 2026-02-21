@@ -1,0 +1,352 @@
+---
+name: symfony-bundle-ux
+description: "Use this skill whenever building or integrating frontend assets in a Symfony bundle: AssetMapper, Stimulus controllers, Twig Components (UI-only and Live), importmaps, CSS/JS distribution, lazy-loading, package.json UX metadata. Trigger when: 'stimulus controller in bundle', 'assetmapper bundle', 'twig component bundle', 'bundle assets', 'UX bundle', 'live component bundle', 'bundle frontend', 'no-build bundle'. Do NOT trigger for application-level asset management."
+---
+
+# Symfony Bundle UX — AssetMapper, Stimulus & Twig Components
+
+Prerequisite: Read `symfony-bundle-core` for base bundle structure.
+
+---
+
+## 1. Decision Workflow
+
+1. Identify the interactivity needed
+2. Check if a Symfony UX bundle already solves it (ux-autocomplete, ux-chartjs, ux-map...)
+3. If UX bundle exists: install via Composer, configure controllers.json, use Twig helpers
+4. If custom and no server reactivity needed: create a Stimulus controller
+5. If server-side reactivity needed: create a Live Component
+6. If static reusable UI: create a Twig Component
+
+---
+
+## 2. AssetMapper Integration (No Build)
+
+AssetMapper eliminates Node.js, Webpack, and build steps. ES module imports natively supported by browsers. Import Maps (W3C spec) resolve bare module names.
+
+Register bundle assets via `prependExtension()`:
+
+```php
+public function prependExtension(
+    ContainerConfigurator $container,
+    ContainerBuilder $builder
+): void {
+    if (!$this->isAssetMapperAvailable($builder)) {
+        return;
+    }
+
+    $builder->prependExtensionConfig('framework', [
+        'asset_mapper' => [
+            'paths' => [
+                __DIR__ . '/../assets/dist' => '@acme/blog-bundle',
+            ],
+        ],
+    ]);
+}
+```
+
+The `@acme/blog-bundle` prefix = logical namespace. Always provide `assets/dist/` with pre-compiled output for distributed bundles.
+
+---
+
+## 3. Stimulus Controllers in Bundles
+
+### File Structure
+
+```
+assets/
+├── controllers/
+│   └── search_controller.js       # Source (snake_case, *_controller.js)
+├── dist/
+│   ├── search_controller.js       # Pre-compiled
+│   └── styles/
+│       └── search.css
+├── styles/
+│   └── search.css                 # Source CSS
+└── package.json                   # UX metadata (critical!)
+```
+
+### Controller Template
+
+```javascript
+/* stimulusFetch: 'lazy' */
+import { Controller } from '@hotwired/stimulus'
+
+export default class extends Controller {
+    static targets = ['input', 'output']
+    static values = {
+        url: String,
+        config: { type: Object, default: {} },
+    }
+
+    connect() {
+        // Init resources
+    }
+
+    disconnect() {
+        // MANDATORY cleanup: abort controllers, destroy instances, removeEventListener
+    }
+
+    actionName(event) {
+        event.preventDefault()
+        // Action logic — delegate heavy work to server via fetch
+    }
+}
+```
+
+### Naming Conventions
+
+- Files: `{name}_controller.js` (snake_case) in `assets/controllers/`
+- Stimulus identifier: `vendor--bundle-name--controller-name` (auto-generated)
+- Values: camelCase in JS (`debounceValue`) -> kebab-case in HTML
+- Targets: camelCase in JS (`inputTarget`) -> kebab-case in HTML
+- Custom events: `{noun}:{verb}` format (`item:selected`, `form:submitted`)
+
+### package.json (Critical for Discovery)
+
+```json
+{
+    "name": "@acme/blog-bundle",
+    "description": "Stimulus controllers for AcmeBlogBundle",
+    "symfony": {
+        "controllers": {
+            "search": {
+                "main": "dist/search_controller.js",
+                "enabled": true,
+                "fetch": "lazy",
+                "autoimport": {
+                    "dist/styles/search.css": true
+                }
+            }
+        },
+        "importmap": {}
+    }
+}
+```
+
+`fetch: "lazy"` is the recommended default for bundles — host apps shouldn't pay the cost of your controller on every page.
+
+### Communication Between Controllers
+
+**Events (loose coupling — preferred):**
+```javascript
+this.element.dispatchEvent(new CustomEvent('item:selected', {
+    bubbles: true,
+    detail: { id: itemId }
+}))
+```
+
+**Outlets (tight coupling — parent-child only):**
+```javascript
+static outlets = ['other-controller']
+doSomething() { this.otherControllerOutlet.someMethod() }
+```
+
+---
+
+## 4. Twig Integration (Helpers Mandatory)
+
+ALWAYS use Twig helpers — never write `data-*` attributes manually (XSS protection, refactor-safe):
+
+```twig
+<div {{ stimulus_controller('vendor--bundle--name', {
+    url: path('route_name'),
+    config: configData,
+}) }}>
+    <input {{ stimulus_target('vendor--bundle--name', 'input') }}
+           {{ stimulus_action('vendor--bundle--name', 'actionName', 'input') }}>
+    <div {{ stimulus_target('vendor--bundle--name', 'output') }}></div>
+</div>
+```
+
+### PHP -> JS Data Transfer
+
+Use Symfony Serializer with groups. NEVER `json_encode()` on objects:
+```php
+$data = $this->serializer->normalize($entity, 'json', ['groups' => 'entity:read']);
+```
+
+---
+
+## 5. Twig Components in Bundles
+
+### UI-Only (no PHP class)
+
+```twig
+{# templates/components/Vendor/Alert.html.twig #}
+{% props type = 'info', dismissible = false %}
+
+<div class="acme-alert acme-alert--{{ type }}" {{ attributes }}>
+    {% block content %}{% endblock %}
+</div>
+```
+
+### FullStack Component (PHP + Twig)
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace Acme\BlogBundle\Twig\Components;
+
+use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
+
+#[AsTwigComponent('Acme:Search', template: '@AcmeBlog/components/Acme/Search.html.twig')]
+final class Search
+{
+    public string $placeholder = 'Search...';
+    public string $endpoint = '/search';
+}
+```
+
+### Registration via prependExtension
+
+```php
+$builder->prependExtensionConfig('twig_component', [
+    'defaults' => [
+        'Acme\\BlogBundle\\Twig\\Components\\' => [
+            'template_directory' => '@AcmeBlog/components',
+            'name_prefix' => 'Acme',
+        ],
+    ],
+]);
+```
+
+Host app override: `templates/bundles/AcmeBlogBundle/components/Acme/Search.html.twig`
+
+---
+
+## 6. Live Components in Bundles
+
+### PHP Class Template
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace Acme\BlogBundle\Twig\Components;
+
+use Symfony\UX\LiveComponent\Attribute\AsLiveComponent;
+use Symfony\UX\LiveComponent\Attribute\LiveAction;
+use Symfony\UX\LiveComponent\Attribute\LiveListener;
+use Symfony\UX\LiveComponent\Attribute\LiveProp;
+use Symfony\UX\LiveComponent\DefaultActionTrait;
+
+#[AsLiveComponent]
+final class SearchLive
+{
+    use DefaultActionTrait;
+
+    #[LiveProp(writable: true)]
+    public string $query = '';
+
+    #[LiveProp]
+    public int $page = 1;
+
+    public function __construct(
+        private readonly SearchRepositoryInterface $repository,
+    ) {}
+
+    /** @return array<SearchResult> */
+    public function getResults(): array
+    {
+        if ($this->query === '') {
+            return [];
+        }
+        return $this->repository->search($this->query, $this->page);
+    }
+
+    #[LiveAction]
+    public function loadMore(): void
+    {
+        $this->page++;
+    }
+
+    #[LiveListener('filter:changed')]
+    public function onFilterChanged(string $category): void
+    {
+        $this->page = 1;
+    }
+}
+```
+
+### LiveProp Security Rules
+
+```php
+#[LiveProp]                              // Read-only (server-controlled)
+#[LiveProp(writable: true)]              // Scalars ONLY
+#[LiveProp(writable: ['name', 'email'])] // Entities with granular fields (SECURE)
+// NEVER: #[LiveProp(writable: true)] on an entity (ID manipulation attack)
+```
+
+### Twig Template
+
+```twig
+<div {{ attributes }}>
+    <input type="text" data-model="debounce(300)|query" placeholder="Search...">
+
+    {% for item in this.results %}
+        <div id="item-{{ item.id }}">{{ item.name }}</div>
+    {% endfor %}
+
+    {% if this.results|length > 0 %}
+        <button data-action="live#action" data-live-action-param="loadMore">Load more</button>
+    {% endif %}
+</div>
+```
+
+### Rules
+
+- `{{ attributes }}` mandatory on root element
+- Stable `id` mandatory on iterated elements in `{% for %}` loops (DOM morphing)
+- `debounce(300)` or `lazy` on text inputs
+- `LiveCollectionType` for dynamic forms (no JS prototype manipulation)
+- Communication: `$this->emit('eventName', [...])` + `#[LiveListener('eventName')]`
+- No business logic in components — delegate to services
+
+### Testing
+
+```php
+use Symfony\UX\LiveComponent\Test\InteractsWithLiveComponents;
+
+public function testLiveAction(): void
+{
+    $component = $this->createLiveComponent(name: SearchLive::class, data: ['query' => 'test']);
+    $component->call('loadMore');
+    self::assertSame(2, $component->component()->page);
+}
+```
+
+---
+
+## 7. CSS Distribution
+
+All CSS class names prefixed with bundle name (`acme-blog-`, `acme-search-`). Self-contained, no external URL references. Distribute via `autoimport` in `package.json`.
+
+---
+
+## 8. Validation Commands
+
+```bash
+php bin/console debug:asset-map      # Check asset mapping
+php bin/console importmap:audit      # JS dependency audit
+php bin/console asset-map:compile    # Production compilation
+```
+
+---
+
+## 9. FORBIDDEN
+
+- `node_modules`, `package.json` npm, jQuery, npm/yarn
+- `DOMContentLoaded`, `window.onload`, `document.querySelector` (incompatible with Turbo)
+- Manual `data-controller` / `data-action` / `data-*-target` attributes (use Twig helpers)
+- `json_encode()` for objects (use Serializer with groups)
+- `removeComments: true` in tsconfig (breaks `stimulusFetch: 'lazy'`)
+- `ux-lazy-image` on LCP image (SEO penalty)
+- Business logic in Stimulus controllers or Twig components
+- Twig macros when a Twig Component achieves the same result (components are typed and injectable)
+- Assets in `public/` directory (use `assets/` + AssetMapper)
+- Bare `<script src="">` in Twig templates
+- `"fetch": "eager"` for heavy bundle controllers
