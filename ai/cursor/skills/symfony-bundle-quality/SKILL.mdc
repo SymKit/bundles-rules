@@ -170,6 +170,8 @@ Run: `make infection` (requires xdebug or pcov for coverage).
 
 ## 6. Deptrac (Architecture Enforcement)
 
+Use the `deptrac/deptrac` composer package.
+
 ### Configuration (`deptrac.yaml`)
 
 ```yaml
