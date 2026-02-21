@@ -20,8 +20,13 @@ Never call `vendor/bin/` directly — always use `make` targets:
 - `make security-check` — `composer audit`
 - `make quality` — full pipeline (cs-check + phpstan + deptrac + lint + test + infection)
 - `make ci` — security-check + quality
+- `make install-hooks` — install git hook that strips Co-authored-by from commit messages (optional, run after clone if the IDE adds it)
 
 Never commit code that fails `make quality`.
+
+## Commits (no self-attribution)
+
+Do not add Co-authored-by, Signed-off-by from the AI, or `git commit --trailer`. If the IDE adds Co-authored-by automatically, add a git hook: `scripts/git-hooks/commit-msg` that strips lines matching `Co-authored-by:`, and `make install-hooks` to copy it to `.git/hooks/commit-msg`. See symfony-bundle.mdc § Commits.
 
 ## PHPStan Level 9
 
@@ -42,7 +47,7 @@ Never commit code that fails `make quality`.
 
 ## GrumPHP
 
-Pre-commit hooks: phpstan, phpcsfixer, phpunit.
+Pre-commit hooks must mirror CI (except security): phpstan, phpcsfixer, phpunit, deptrac, infection. Same thresholds as Makefile (e.g. infection `min_covered_msi: 65`). This way a commit that would fail CI (e.g. 0% MSI) is blocked locally.
 Note: `composer_audit` is NOT a valid GrumPHP task — use `make security-check` separately.
 
 ## Composer allow-plugins
