@@ -19,8 +19,10 @@ alwaysApply: false
 - `FrontmatterConverter::parseMdc()` — parse frontmatter + body extraction
 - `FrontmatterConverter::toClaudeFormat()` — alwaysApply rules, glob-scoped rules, skill files
 - `FrontmatterConverter::toWindsurfFormat()` — strip all frontmatter
+- `FrontmatterConverter::toAntigravityFormat()` — strip all frontmatter
 - `ClaudeFormatConverter::convert()` — delegates to FrontmatterConverter
 - `WindsurfFormatConverter::convert()` — delegates to FrontmatterConverter
+- `AntigravityFormatConverter::convert()` — delegates to FrontmatterConverter
 - `IdentityConverter::convert()` — returns content unchanged
 - `DefaultEditorConfigProvider::get()` — returns correct config per editor, null for unknown
 - `EditorConfig` — value object construction and property access
@@ -30,7 +32,7 @@ alwaysApply: false
 
 - `AiRulesInstaller::sync()` with temp directories:
   - Creates rules in target dir for each editor
-  - Converts `.mdc` to `.md` for Claude/Windsurf
+  - Converts `.mdc` to `.md` for Claude/Windsurf/Antigravity
   - Copies non-`.mdc` files as-is (e.g. `scaffold_bundle.php`)
   - Copies only selected skills
   - Never deletes existing files in target (merge-only)

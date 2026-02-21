@@ -90,6 +90,24 @@ final class AiRulesInstallerTest extends TestCase
     }
 
     #[Test]
+    public function syncConvertsMdcToMdForAntigravity(): void
+    {
+        file_put_contents(
+            $this->packageDir.'/ai/cursor/rules/test-rule.mdc',
+            "---\ndescription: Test\nglobs: src/**/*.php\nalwaysApply: false\n---\n# Test Rule\n\nContent.",
+        );
+
+        $context = new SyncContext($this->packageDir, $this->projectDir, ['antigravity'], []);
+        $this->installer->sync($context);
+
+        self::assertFileExists($this->projectDir.'/.agent/rules/test-rule.md');
+        self::assertStringEqualsFile(
+            $this->projectDir.'/.agent/rules/test-rule.md',
+            "# Test Rule\n\nContent.",
+        );
+    }
+
+    #[Test]
     public function syncCopiesNonMdcFilesAsIs(): void
     {
         file_put_contents(
@@ -170,12 +188,13 @@ final class AiRulesInstallerTest extends TestCase
             "---\ndescription: Test\nalwaysApply: true\n---\n# Test Rule",
         );
 
-        $context = new SyncContext($this->packageDir, $this->projectDir, ['cursor', 'claude', 'windsurf'], []);
+        $context = new SyncContext($this->packageDir, $this->projectDir, ['cursor', 'claude', 'windsurf', 'antigravity'], []);
         $this->installer->sync($context);
 
         self::assertFileExists($this->projectDir.'/.cursor/rules/test-rule.mdc');
         self::assertFileExists($this->projectDir.'/.claude/rules/test-rule.md');
         self::assertFileExists($this->projectDir.'/.windsurf/rules/test-rule.md');
+        self::assertFileExists($this->projectDir.'/.agent/rules/test-rule.md');
     }
 
     private function removeDirectory(string $dir): void

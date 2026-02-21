@@ -54,6 +54,18 @@ final class DefaultEditorConfigProviderTest extends TestCase
     }
 
     #[Test]
+    public function getAntigravityReturnsCorrectConfig(): void
+    {
+        $config = $this->provider->get('antigravity');
+
+        self::assertNotNull($config);
+        self::assertSame('.agent/rules', $config->rulesDir);
+        self::assertSame('.agent/rules/skills', $config->skillsDir);
+        self::assertSame('md', $config->fileExtension);
+        self::assertNotNull($config->contentConverter);
+    }
+
+    #[Test]
     public function getUnknownEditorReturnsNull(): void
     {
         self::assertNull($this->provider->get('unknown'));

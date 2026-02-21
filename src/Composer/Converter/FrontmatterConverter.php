@@ -65,4 +65,12 @@ final readonly class FrontmatterConverter
     {
         return self::parseMdc($mdcContent)['body'];
     }
+
+    /**
+     * Convert a Cursor .mdc file to Google Antigravity .md format (strip all frontmatter).
+     */
+    public static function toAntigravityFormat(string $mdcContent): string
+    {
+        return self::parseMdc($mdcContent)['body'];
+    }
 }

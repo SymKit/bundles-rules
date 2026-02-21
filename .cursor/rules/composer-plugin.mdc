@@ -8,9 +8,9 @@ alwaysApply: true
 ## Project Identity
 
 - Composer plugin (`"type": "composer-plugin"`) named `symkit/bundle-ai-kit`
-- Installs AI rules and skills into consumer projects for Cursor, Claude Code, and Windsurf
+- Installs AI rules and skills into consumer projects for Cursor, Claude Code, Windsurf, and Google Antigravity
 - Single source of truth: `ai/cursor/rules/` and `ai/cursor/skills/`
-- Runtime conversion from `.mdc` (Cursor) to `.md` (Claude, Windsurf) via `FrontmatterConverter`
+- Runtime conversion from `.mdc` (Cursor) to `.md` (Claude, Windsurf, Antigravity) via `FrontmatterConverter`
 - Config read from consumer's `extra.bundle-ai-kit` in `composer.json`
 
 ## Architecture — SOLID by Design
@@ -32,6 +32,7 @@ src/Composer/
 │   ├── FrontmatterConverter.php
 │   ├── ClaudeFormatConverter.php
 │   ├── WindsurfFormatConverter.php
+│   ├── AntigravityFormatConverter.php
 │   └── IdentityConverter.php
 └── Installer/                          # File sync engine
     └── AiRulesInstaller.php
@@ -41,7 +42,7 @@ src/Composer/
 
 - **S**: Plugin only wires events. Resolver only resolves context. Installer only syncs files. Converters only transform content.
 - **O**: New editor = new `ContentConverterInterface` + new entry in `EditorConfigProviderInterface`. Installer untouched.
-- **L**: Any `ContentConverterInterface` implementation is substitutable (Identity, Claude, Windsurf).
+- **L**: Any `ContentConverterInterface` implementation is substitutable (Identity, Claude, Windsurf, Antigravity).
 - **I**: Three focused interfaces: `ContentConverterInterface` (convert), `EditorConfigProviderInterface` (get config), `SyncContextResolverInterface` (resolve context).
 - **D**: `AiRulesInstaller` depends on `EditorConfigProviderInterface`, not on `DefaultEditorConfigProvider`. `Plugin` depends on `SyncContextResolverInterface`, not on `DefaultSyncContextResolver`.
 
@@ -59,7 +60,8 @@ src/Composer/
 |----------|--------------------------|--------------------------------|--------|
 | Cursor   | `.cursor/rules/`         | `.cursor/skills/{name}/`       | `.mdc` |
 | Claude   | `.claude/rules/`         | `.claude/rules/skills/{name}/` | `.md`  |
-| Windsurf | `.windsurf/rules/`       | `.windsurf/rules/skills/{name}/` | `.md` |
+| Windsurf     | `.windsurf/rules/`       | `.windsurf/rules/skills/{name}/` | `.md`  |
+| Antigravity  | `.agent/rules/`          | `.agent/rules/skills/{name}/`    | `.md`  |
 
 Default: `editors: ["cursor"]`. User opts in via `extra.bundle-ai-kit.editors`.
 

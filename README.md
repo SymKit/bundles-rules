@@ -2,7 +2,7 @@
 
 AI rules and optional skills for building Symfony bundles with best practices: SOLID, AbstractBundle, Contract pattern, and quality tooling (PHPStan 9, GrumPHP, Infection, Deptrac, CI).
 
-Supports **Cursor**, **Claude Code**, and **Windsurf** from a single source of truth.
+Supports **Cursor**, **Claude Code**, **Windsurf**, and **Google Antigravity** from a single source of truth.
 
 **By default** the Composer plugin installs **all 7 rules** for **Cursor** into your project and **no skills**. You can enable additional editors and specific skills via `composer.json` (see [Configuration](#configuration)). User-added files are never removed; the plugin only merges or overwrites its own files.
 
@@ -17,6 +17,7 @@ Supports **Cursor**, **Claude Code**, and **Windsurf** from a single source of t
 | [Cursor](https://cursor.com/) | `.cursor/rules/*.mdc` | `.cursor/skills/` |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `.claude/rules/*.md` | `.claude/rules/skills/` |
 | [Windsurf](https://windsurf.com/) | `.windsurf/rules/*.md` | `.windsurf/rules/skills/` |
+| [Google Antigravity](https://antigravity.google/) | `.agent/rules/*.md` | `.agent/rules/skills/` |
 
 ## Installation
 
@@ -72,25 +73,26 @@ Configuration is optional and lives under `extra.bundle-ai-kit` in your bundle's
 
 ### Choosing editors
 
-By default only **Cursor** is enabled. To add Claude Code and/or Windsurf, set the `editors` array:
+By default only **Cursor** is enabled. To add other editors, set the `editors` array:
 
 ```json
 {
     "extra": {
         "bundle-ai-kit": {
-            "editors": ["cursor", "claude", "windsurf"]
+            "editors": ["cursor", "claude", "windsurf", "antigravity"]
         }
     }
 }
 ```
 
-Valid values: `"cursor"`, `"claude"`, `"windsurf"`.
+Valid values: `"cursor"`, `"claude"`, `"windsurf"`, `"antigravity"`.
 
 The plugin reads rules from a single source (`ai/cursor/`) and converts the frontmatter format automatically for each target editor:
 
 - **Cursor** — copies `.mdc` files as-is
 - **Claude Code** — converts to `.md` with `globs:` frontmatter for path-scoped rules
 - **Windsurf** — converts to `.md` with no frontmatter (plain markdown)
+- **Google Antigravity** — converts to `.md` with no frontmatter (activation modes are configured via the IDE UI)
 
 ### Enabling skills
 
@@ -102,7 +104,7 @@ By default **no skills** are installed. To enable specific skills, set the `skil
 {
     "extra": {
         "bundle-ai-kit": {
-            "editors": ["cursor", "claude", "windsurf"],
+            "editors": ["cursor", "claude", "windsurf", "antigravity"],
             "skills": [
                 "symfony-bundle-core",
                 "symfony-bundle-ux",
@@ -127,7 +129,7 @@ Available skills:
 | `symfony-bundle-flex` | Flex recipes, `manifest.json` |
 | `symfony-bundle-quality` | Makefile, PHPStan 9, GrumPHP, Infection, Deptrac, CI |
 
-Skills are installed into the editor-specific skills directory (e.g. `.cursor/skills/`, `.claude/rules/skills/`, `.windsurf/rules/skills/`).
+Skills are installed into the editor-specific skills directory (e.g. `.cursor/skills/`, `.claude/rules/skills/`, `.windsurf/rules/skills/`, `.agent/rules/skills/`).
 
 ## What you get
 
@@ -175,6 +177,7 @@ Choose which AI editor directories to ignore. Add any combination of:
 .cursor/
 .claude/
 .windsurf/
+.agent/
 ```
 
 Either:

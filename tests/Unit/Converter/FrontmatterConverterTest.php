@@ -114,4 +114,24 @@ final class FrontmatterConverterTest extends TestCase
 
         self::assertSame($content, $result);
     }
+
+    #[Test]
+    public function toAntigravityFormatStripsAllFrontmatter(): void
+    {
+        $mdc = "---\ndescription: Rule\nglobs: src/**/*.php\nalwaysApply: false\n---\n# Title\n\nBody.";
+
+        $result = FrontmatterConverter::toAntigravityFormat($mdc);
+
+        self::assertSame("# Title\n\nBody.", $result);
+    }
+
+    #[Test]
+    public function toAntigravityFormatWithoutFrontmatter(): void
+    {
+        $content = "# Title\n\nBody.";
+
+        $result = FrontmatterConverter::toAntigravityFormat($content);
+
+        self::assertSame($content, $result);
+    }
 }

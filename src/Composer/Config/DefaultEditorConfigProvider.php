@@ -6,12 +6,13 @@ namespace Symkit\BundleAiKit\Composer\Config;
 
 use Symkit\BundleAiKit\Composer\Contract\ContentConverterInterface;
 use Symkit\BundleAiKit\Composer\Contract\EditorConfigProviderInterface;
+use Symkit\BundleAiKit\Composer\Converter\AntigravityFormatConverter;
 use Symkit\BundleAiKit\Composer\Converter\ClaudeFormatConverter;
 use Symkit\BundleAiKit\Composer\Converter\IdentityConverter;
 use Symkit\BundleAiKit\Composer\Converter\WindsurfFormatConverter;
 
 /**
- * Provides config for supported editors: cursor, claude, windsurf.
+ * Provides config for supported editors: cursor, claude, windsurf, antigravity.
  */
 final class DefaultEditorConfigProvider implements EditorConfigProviderInterface
 {
@@ -19,6 +20,7 @@ final class DefaultEditorConfigProvider implements EditorConfigProviderInterface
         private readonly ContentConverterInterface $cursorConverter,
         private readonly ContentConverterInterface $claudeConverter,
         private readonly ContentConverterInterface $windsurfConverter,
+        private readonly ContentConverterInterface $antigravityConverter,
     ) {
     }
 
@@ -28,6 +30,7 @@ final class DefaultEditorConfigProvider implements EditorConfigProviderInterface
             new IdentityConverter(),
             new ClaudeFormatConverter(),
             new WindsurfFormatConverter(),
+            new AntigravityFormatConverter(),
         );
     }
 
@@ -51,6 +54,12 @@ final class DefaultEditorConfigProvider implements EditorConfigProviderInterface
                 '.windsurf/rules/skills',
                 'md',
                 $this->windsurfConverter,
+            ),
+            'antigravity' => new EditorConfig(
+                '.agent/rules',
+                '.agent/rules/skills',
+                'md',
+                $this->antigravityConverter,
             ),
             default => null,
         };
