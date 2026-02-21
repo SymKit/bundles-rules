@@ -2,7 +2,7 @@
     "name": "symkit/bundle-ai-kit",
     "description": "AI rules and optional skills for building Symfony bundles (best practices, SOLID, AbstractBundle, quality tooling)",
     "type": "composer-plugin",
-    "version": "0.0.1",
+    "version": "0.0.3",
     "authors": [
         {
             "name": "SymKit",
