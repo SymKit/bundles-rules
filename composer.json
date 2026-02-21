@@ -1,0 +1,25 @@
+{
+    "name": "seb/symfony-bundle-cursor-kit",
+    "description": "Cursor AI rules and optional skills for building Symfony bundles (best practices, SOLID, AbstractBundle, quality tooling)",
+    "type": "composer-plugin",
+    "version": "0.0.1",
+    "authors": [
+        {
+            "name": "SymKit",
+            "email": "s.dieunidou@gmail.com"
+        }
+    ],
+    "license": "MIT",
+    "require": {
+        "php": ">=8.2",
+        "composer-plugin-api": "^2.0 || ^3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Seb\\SymfonyBundleCursorKit\\Composer\\": "src/Composer/"
+        }
+    },
+    "extra": {
+        "class": "Seb\\SymfonyBundleCursorKit\\Composer\\Plugin"
+    }
+}
