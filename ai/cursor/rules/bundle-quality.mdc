@@ -17,7 +17,7 @@ Never call `vendor/bin/` directly — always use `make` targets:
 - `make test` — run PHPUnit
 - `make deptrac` — architecture enforcement
 - `make infection` — mutation testing
-- `make security-check` — `composer audit`
+- `make security-check` — `composer audit --abandoned=report`
 - `make quality` — full pipeline (cs-check + phpstan + deptrac + lint + test + infection)
 - `make ci` — security-check + quality
 - `make install-hooks` — install git hook that strips Co-authored-by from commit messages (optional, run after clone if the IDE adds it)
@@ -93,6 +93,11 @@ phpstan.neon
 *.log
 ```
 
+## Dependencies
+
+- Deptrac: use `deptrac/deptrac` (not the abandoned `qossmic/deptrac`)
+- Always use `composer audit --abandoned=report` so abandoned packages are reported but only security vulnerabilities fail the build
+
 ## Anti-Patterns
 
 - Calling `vendor/bin/` directly instead of Makefile targets
@@ -102,3 +107,5 @@ phpstan.neon
 - No `composer audit` in CI
 - No Deptrac (architecture erodes)
 - `composer_audit` in grumphp.yml (task does not exist)
+- `composer audit` without `--abandoned=report` (fails CI on abandoned transitive deps)
+- Using `qossmic/deptrac` instead of `deptrac/deptrac` (abandoned)

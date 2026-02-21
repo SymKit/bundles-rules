@@ -16,12 +16,12 @@
     },
     "require-dev": {
         "composer/composer": "^2.0 || ^3.0",
-        "phpstan/phpstan": "^2.1",
+        "deptrac/deptrac": "^2.0",
         "friendsofphp/php-cs-fixer": "^3.68",
-        "phpunit/phpunit": "^11.5",
         "infection/infection": "^0.29",
-        "qossmic/deptrac": "^2.0",
-        "phpro/grumphp": "^2.10"
+        "phpro/grumphp": "^2.10",
+        "phpstan/phpstan": "^2.1",
+        "phpunit/phpunit": "^11.5"
     },
     "autoload": {
         "psr-4": {

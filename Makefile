@@ -19,7 +19,7 @@ infection:
 	vendor/bin/infection --configuration=infection.json5 --only-covered --threads=max --min-msi=70 --min-covered-msi=70
 
 security-check:
-	composer audit
+	composer audit --abandoned=report
 
 quality: cs-check phpstan deptrac test infection
 
