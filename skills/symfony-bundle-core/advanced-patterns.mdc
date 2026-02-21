@@ -1,3 +1,8 @@
+---
+name: symfony-bundle-core-advanced-patterns
+description: "Advanced Symfony bundle patterns: compiler passes, event system, security voters, conditional service registration, configuration validation, deep merge pitfalls, cache warmers, and semantic versioning contracts. Referenced from the main symfony-bundle-core skill for deeper topics."
+---
+
 # Advanced Bundle Patterns Reference
 
 ## Compiler Passes

@@ -6,12 +6,22 @@ alwaysApply: false
 
 # Bundle Quality Tooling
 
-## Pipeline
+## Makefile First
 
-- `make quality` = cs-check + phpstan + deptrac + lint + test + infection
-- `make security-check` = composer audit
-- `make ci` = security-check + quality
-- Never commit code that fails `make quality`
+The Makefile is the SINGLE entry point for all quality operations.
+Never call `vendor/bin/` directly — always use `make` targets:
+
+- `make cs-fix` — fix code style
+- `make cs-check` — check without fixing
+- `make phpstan` — static analysis level 9
+- `make test` — run PHPUnit
+- `make deptrac` — architecture enforcement
+- `make infection` — mutation testing
+- `make security-check` — `composer audit`
+- `make quality` — full pipeline (cs-check + phpstan + deptrac + lint + test + infection)
+- `make ci` — security-check + quality
+
+Never commit code that fails `make quality`.
 
 ## PHPStan Level 9
 
@@ -19,6 +29,7 @@ alwaysApply: false
 - No `mixed` without justification
 - Typed collections: `/** @var Collection<int, Entity> */`
 - Typed repository returns: `@return Entity[]`
+- `@param array{key: type}` for shaped arrays (especially `loadExtension()` config)
 
 ## PHP-CS-Fixer
 
@@ -31,7 +42,14 @@ alwaysApply: false
 
 ## GrumPHP
 
-Pre-commit hooks: phpstan, phpcsfixer, phpunit, composer_audit.
+Pre-commit hooks: phpstan, phpcsfixer, phpunit.
+Note: `composer_audit` is NOT a valid GrumPHP task — use `make security-check` separately.
+
+## Composer allow-plugins
+
+Always configure in `composer.json`:
+- `infection/extension-installer: true`
+- `phpro/grumphp: true`
 
 ## Deptrac
 
@@ -52,10 +70,27 @@ Pre-commit hooks: phpstan, phpcsfixer, phpunit, composer_audit.
 - `fail-fast: false` on test matrix
 - Symfony deps: always `^7.0 || ^8.0`
 
+## .gitignore essentials
+
+```
+/vendor/
+composer.lock
+.phpstan-cache/
+.php-cs-fixer.cache
+.deptrac.cache
+.phpunit.result.cache
+infection.log
+infection-summary.log
+phpunit.xml
+phpstan.neon
+```
+
 ## Anti-Patterns
 
+- Calling `vendor/bin/` directly instead of Makefile targets
 - `phpstan.neon` instead of `.dist` (overridden locally)
 - MSI < 50% (tests don't verify behavior)
 - Ignoring deprecations
 - No `composer audit` in CI
 - No Deptrac (architecture erodes)
+- `composer_audit` in grumphp.yml (task does not exist)

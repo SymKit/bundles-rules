@@ -234,6 +234,6 @@ Use `nyholm/symfony-bundle-test`. Always generate at least one integration test.
 
 ## Additional Resources
 
-- For compiler passes, events, voters, cache warmers, and semver contracts, see [advanced-patterns.md](advanced-patterns.md)
+- For compiler passes, events, voters, cache warmers, and semver contracts, see [advanced-patterns.mdc](advanced-patterns.mdc)
 - To scaffold a bundle from the command line, run [scaffold_bundle.php](scaffold_bundle.php)
 - For quality tooling (Makefile, PHPStan 9, GrumPHP, Infection, Deptrac, CI), read the `symfony-bundle-quality` skill

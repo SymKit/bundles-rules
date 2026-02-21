@@ -11,6 +11,14 @@ alwaysApply: true
 - Exceptions: Doctrine entities (not `readonly`), bundle class (not `final`), classes documented for inheritance
 - Extension points: interfaces, events, compiler passes, decorators — never inheritance
 
+## AbstractBundle (Symfony 7+/8+)
+
+- Always extend `AbstractBundle`, never `Bundle` with separate Extension/Configuration classes
+- `configure()` for config tree, `loadExtension()` for container loading, `prependExtension()` for prepending other bundles
+- `DependencyInjection/` folder is unnecessary with AbstractBundle — all DI logic lives in the bundle class
+- `$this->getPath()` for bundle root path (replaces `\dirname(__DIR__, 2)`)
+- Translations auto-discovered from `<BundlePath>/translations/` (XLIFF format)
+
 ## SOLID
 
 - **S**: One class, one responsibility. No "god service".
@@ -33,25 +41,36 @@ alwaysApply: true
 
 ## Structure
 
-- `src/Contract/`, `src/Event/`, `src/DependencyInjection/CompilerPass/` always present
-- XML for service definitions (no Yaml dependency). Defaults: `autowire=true autoconfigure=true public=false`
+- `src/Contract/`, `src/Event/` always present when applicable
+- XML for service definitions when needed (no Yaml dependency). Defaults: `autowire=true autoconfigure=true public=false`
+- `translations/` at bundle root for XLIFF files (auto-discovered by Symfony)
 - Never extend `AbstractController` — inject specific services
 
 ## Dependencies
 
-- Symfony packages: always `^7.0 || ^8.0`
+- Symfony packages: always `^7.0 || ^8.0` (semver, never `7.*|8.*`)
 - Only declare actual dependencies. Optional deps in `suggest`.
 - Never embed vendor code in `src/`
+- Composer `allow-plugins`: configure `infection/extension-installer` and `phpro/grumphp` in `composer.json`
 
 ## Anti-Patterns
 
+- Using `Bundle` instead of `AbstractBundle` with separate Extension/Configuration classes
+- `new Configuration()` or `new Service()` — always use DI or AbstractBundle built-in methods
 - Public services by default, missing service ID prefix, YAML services
-- `new Service()`, setter injection, business logic in controller/entity
+- Setter injection, business logic in controller/entity
 - Hardcoded parameters instead of `configure()` + env vars
+- Symfony constraints `7.*|8.*` instead of `^7.0 || ^8.0`
 
-## After Every Change
+## After Every Change — Makefile First
 
-Run `make quality` to validate code style, static analysis, architecture, tests, and mutations.
+Always use Makefile targets. Never call `vendor/bin/` directly.
+
+- `make cs-fix` — fix code style
+- `make phpstan` — static analysis
+- `make test` — run tests
+- `make quality` — full pipeline (cs-check + phpstan + deptrac + lint + test + infection)
+- `make ci` — security-check + quality
 
 ## Available Skills
 

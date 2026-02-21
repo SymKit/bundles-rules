@@ -29,17 +29,17 @@ Fournit **7 rules projet** (portables, a copier dans chaque bundle) et **5 skill
 Les skills sont globaux et disponibles dans tous vos projets Cursor.
 
 ```bash
-cp -r skills/symfony-bundle-core     ~/.cursor/skills/symfony-bundle-core
-cp -r skills/symfony-bundle-ux       ~/.cursor/skills/symfony-bundle-ux
-cp -r skills/symfony-bundle-doctrine ~/.cursor/skills/symfony-bundle-doctrine
-cp -r skills/symfony-bundle-flex     ~/.cursor/skills/symfony-bundle-flex
-cp -r skills/symfony-bundle-quality  ~/.cursor/skills/symfony-bundle-quality
+cp -r skills/symfony-bundle-core     .cursor/skills/symfony-bundle-core
+cp -r skills/symfony-bundle-ux       .cursor/skills/symfony-bundle-ux
+cp -r skills/symfony-bundle-doctrine .cursor/skills/symfony-bundle-doctrine
+cp -r skills/symfony-bundle-flex     .cursor/skills/symfony-bundle-flex
+cp -r skills/symfony-bundle-quality  .cursor/skills/symfony-bundle-quality
 ```
 
 Ou en une commande :
 
 ```bash
-cp -r skills/symfony-bundle-* ~/.cursor/skills/
+cp -r skills/symfony-bundle-* .cursor/skills/
 ```
 
 ### 2. Rules projet (pour chaque bundle)
@@ -79,17 +79,17 @@ Le bundle scaffolde inclut : Makefile, PHPStan 9, PHP-CS-Fixer, GrumPHP, Infecti
 
 skills/                           # Skills personnels (a copier dans ~/.cursor/skills/)
   symfony-bundle-core/            # Architecture, scaffolding, SOLID, Contract pattern
-    SKILL.md
-    advanced-patterns.md           # Compiler passes, events, voters, cache warmers
+    SKILL.mdc
+    advanced-patterns.mdc          # Compiler passes, events, voters, cache warmers
     scaffold_bundle.php            # Version enrichie du scaffolder
   symfony-bundle-ux/              # AssetMapper, Stimulus, Twig/Live Components
-    SKILL.md
+    SKILL.mdc
   symfony-bundle-doctrine/        # Entites, XML mapping, UUID v7, collections typees
-    SKILL.md
+    SKILL.mdc
   symfony-bundle-flex/            # Recipes Flex, manifest.json
-    SKILL.md
+    SKILL.mdc
   symfony-bundle-quality/         # Makefile, PHPStan 9, GrumPHP, Infection, Deptrac, CI
-    SKILL.md
+    SKILL.mdc
 
 scripts/
   scaffold_bundles.php            # Scaffolder de bundle standalone

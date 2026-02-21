@@ -40,3 +40,8 @@ alwaysApply: false
 - Business logic in controllers — delegate to server via fetch
 - Assets in `public/` — use `assets/` + AssetMapper
 - Bare `<script src="">` in Twig templates
+- CDN links for JS/CSS libraries — use AssetMapper or inline for self-contained pages
+
+## After Every Change
+
+Run `make quality` to validate the full pipeline.

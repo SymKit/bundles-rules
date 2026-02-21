@@ -16,10 +16,31 @@ Every PHP file starts with `declare(strict_types=1)`.
 - Exceptions: Doctrine entities (not `readonly`), bundle class (not `final`), documented inheritance
 - Constructor injection only with promoted properties (`private readonly`)
 
+## AbstractBundle Pattern
+
+The bundle class extends `AbstractBundle` (never `Bundle`):
+
+```php
+class VendorNameBundle extends AbstractBundle
+{
+    public function configure(DefinitionConfigurator $definition): void { ... }
+
+    /** @param array{key: type, ...} $config */
+    public function loadExtension(array $config, ContainerConfigurator $container, ContainerBuilder $builder): void { ... }
+
+    public function prependExtension(ContainerConfigurator $container, ContainerBuilder $builder): void { ... }
+}
+```
+
+- `loadExtension()` receives processed config: always add `@param array{...}` PHPDoc for PHPStan level 9
+- No separate `Configuration.php` or `*Extension.php` — everything in the bundle class
+- Use `$this->getPath()` for paths, never `\dirname(__DIR__, N)`
+
 ## Typing
 
 - All parameters, return types, and properties must be typed
 - No `mixed` except with a comment justifying why
+- PHPStan level 9: use `@param array{key: type}` for shaped arrays (especially `loadExtension()`)
 - Doctrine collections: `/** @var Collection<int, Entity> */`
 - Repository returns: `@return Entity[]` or exact union type, never `mixed[]`
 
@@ -40,7 +61,13 @@ Every PHP file starts with `declare(strict_types=1)`.
 
 ## Forbidden
 
+- `Bundle` with `DependencyInjection/Extension.php` and `Configuration.php` (use `AbstractBundle`)
+- `new Configuration()` in extension classes
 - Business logic in controllers or entities
 - `@phpstan-ignore` without explanatory comment
 - Implicit `void` return types
 - Anonymous classes for services (untestable)
+
+## After Every Change
+
+Run `make cs-fix` then `make phpstan` to validate style and types.

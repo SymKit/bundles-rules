@@ -6,6 +6,13 @@ alwaysApply: false
 
 # XML Configuration Conventions
 
+## When to Use XML
+
+- XML service definitions are needed only for bundles with services beyond the bundle class itself
+- With AbstractBundle, simple bundles (config + prepend only) do NOT need XML service files
+- Use XML when the bundle registers services, listeners, compiler passes, etc.
+- Never use YAML for service definitions (avoids yaml dependency)
+
 ## Service Definitions
 
 - Defaults: `autowire="true" autoconfigure="true" public="false"`
@@ -34,3 +41,7 @@ alwaysApply: false
 <service id="Acme\BlogBundle\Contract\ArticleManagerInterface"
          alias="acme_blog.article_manager" />
 ```
+
+## After Every Change
+
+Run `make quality` to validate the full pipeline.

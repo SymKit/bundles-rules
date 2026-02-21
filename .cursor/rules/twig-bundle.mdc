@@ -1,5 +1,5 @@
 ---
-description: Twig component and Live Component conventions for Symfony bundles
+description: Twig component, Live Component, and template conventions for Symfony bundles
 globs: templates/**/*.twig
 alwaysApply: false
 ---
@@ -15,6 +15,31 @@ Always use Twig helpers — never manual `data-*` attributes (XSS protection, re
 {{ stimulus_target('vendor--bundle--name', 'input') }}
 {{ stimulus_action('vendor--bundle--name', 'actionName', 'input') }}
 ```
+
+## Internationalization (i18n)
+
+- Use `{% trans_default_domain 'VendorNameBundle' %}` at the top of base templates to avoid repeating the domain
+- Child templates inherit the domain from `{% extends %}`
+- XLIFF files in `translations/` at bundle root (auto-discovered)
+- Translation keys: `error.404.heading`, `error.action.home` — dot-separated, descriptive
+- Always provide at least 2 locales (e.g. `fr` + `en`)
+- Dynamic locale: `lang="{{ app.request.locale|default('en') }}"` on `<html>`
+
+## Self-Contained Pages (Error Pages, Emails)
+
+For pages that must render independently of the application's asset pipeline:
+
+- **Inline CSS only** — never CDN (`cdn.tailwindcss.com`, `unpkg.com`, etc.)
+- **Inline SVG** for icons — never external icon libraries via `<script>`
+- **No bare `<script src="">`** — pages must work offline / behind strict CSP
+- CSS custom properties (`--var`) for theme values overridable by child templates
+- Use semantic CSS class names (`.terminal-header`, not `.bg-subtle .px-4 .py-3`)
+
+## Security in Templates
+
+- **Never expose** `app.request.clientIp` (information leak)
+- **Never display** fake trace IDs with `random()` (misleading)
+- `app.request.pathInfo` is auto-escaped by Twig but still reveals internal paths — use with caution
 
 ## PHP → JS Data Transfer
 
@@ -55,6 +80,8 @@ NEVER #[LiveProp(writable: true)] on entire entity (ID manipulation attack)
 
 ## FORBIDDEN
 
+- CDN links in self-contained templates (error pages, emails)
 - Twig macros when a Twig Component does the same (components are typed, injectable)
 - `ux-lazy-image` on LCP image (SEO penalty)
 - `json_encode()` for objects in templates
+- Exposing `app.request.clientIp` in user-facing templates
