@@ -1,0 +1,99 @@
+---
+description: Strict PHP code style for Composer plugin source code
+globs: src/**/*.php
+alwaysApply: false
+---
+
+# PHP Code Style — Composer Plugin
+
+## Mandatory Header
+
+Every PHP file starts with `declare(strict_types=1)`.
+
+## Classes
+
+- `final readonly class` for: value objects (`EditorConfig`, `SyncContext`), converters, resolvers
+- `final class` (without `readonly`) for: classes with mutable state or complex initialization (`DefaultEditorConfigProvider`, `AiRulesInstaller`)
+- `Plugin` is `final class` — Composer instantiates it with no args, uses optional constructor parameters
+
+## Typing
+
+- All parameters, return types, and properties must be typed
+- No `mixed` except with a comment justifying why
+- PHPStan level 9: use `@param array{key: type}` for shaped arrays
+- Nullable types for optional constructor params: `?SyncContextResolverInterface $contextResolver = null`
+- Return `?EditorConfig` (not `EditorConfig|null`) for consistency
+- `@param list<string>` for indexed string arrays
+- `@var array<string, array{...}>` for const maps
+
+## Constructor Patterns
+
+Constructor injection with promoted properties:
+
+```php
+final readonly class DefaultSyncContextResolver implements SyncContextResolverInterface
+{
+    public function __construct(
+        private string $packageName,
+        private string $configKey,
+    ) {
+    }
+}
+```
+
+Composer-compatible constructor (Plugin only):
+
+```php
+public function __construct(
+    ?SyncContextResolverInterface $contextResolver = null,
+    ?AiRulesInstaller $installer = null,
+) {
+    $this->contextResolver = $contextResolver ?? DefaultSyncContextResolver::forBundleAiKit();
+    $this->installer = $installer ?? new AiRulesInstaller(DefaultEditorConfigProvider::create());
+}
+```
+
+## Named Constructors
+
+Use static factory methods for common instantiation:
+
+```php
+public static function forBundleAiKit(): self { ... }
+public static function create(): self { ... }
+```
+
+## Language Features
+
+- Native function prefix: `\is_dir()`, `\mkdir()`, `\copy()`, `\file_get_contents()`, `\preg_match()`, `\substr()`, `\str_ends_with()`
+- `match` over `switch` when applicable
+- Early return to reduce nesting
+- Trailing comma in multiline: arguments, parameters, match, arrays
+
+## File Operations
+
+- Always check `\is_dir()` / `\is_string()` before filesystem ops
+- `\mkdir($dir, 0755, true)` for recursive dir creation
+- Handle `\file_get_contents()` returning `false` (continue/skip)
+- `RecursiveDirectoryIterator` + `RecursiveIteratorIterator` for directory traversal
+
+## Namespace Organization
+
+- `Symkit\BundleAiKit\Composer\Contract\` — interfaces
+- `Symkit\BundleAiKit\Composer\Config\` — editor config
+- `Symkit\BundleAiKit\Composer\Context\` — sync context
+- `Symkit\BundleAiKit\Composer\Converter\` — content converters
+- `Symkit\BundleAiKit\Composer\Installer\` — file sync
+- `Symkit\BundleAiKit\Composer\` — Plugin only
+
+## Forbidden
+
+- `new ConcreteService()` outside Plugin constructor and static factories
+- Setter or property injection
+- `@phpstan-ignore` without explanatory comment
+- Implicit `void` return types
+- Anonymous classes
+- Hard-coding editor names/paths outside `DefaultEditorConfigProvider`
+
+## After Every Change
+
+Run `make cs-fix` then `make phpstan` to validate style and types.

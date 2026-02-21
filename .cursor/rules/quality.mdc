@@ -1,0 +1,130 @@
+---
+description: Quality tooling configuration and CI pipeline for the Composer plugin
+globs: Makefile, grumphp.yml, phpstan.neon.dist, .php-cs-fixer.dist.php, infection.json5, deptrac.yaml, .github/**/*.yml
+alwaysApply: false
+---
+
+# Quality Tooling
+
+## Makefile First
+
+The Makefile is the SINGLE entry point for all quality operations.
+Never call `vendor/bin/` directly — always use `make` targets:
+
+- `make cs-fix` — fix code style
+- `make cs-check` — check without fixing
+- `make phpstan` — static analysis level 9
+- `make test` — run PHPUnit
+- `make deptrac` — architecture enforcement
+- `make infection` — mutation testing
+- `make security-check` — `composer audit`
+- `make quality` — full pipeline (cs-check + phpstan + deptrac + test + infection)
+- `make ci` — security-check + quality
+- `make install-hooks` — install git hook that strips Co-authored-by
+
+Never commit code that fails `make quality`.
+
+## Commits (no self-attribution)
+
+Do not add Co-authored-by, Signed-off-by from the AI, or `git commit --trailer`. If the IDE adds Co-authored-by automatically, use `scripts/git-hooks/commit-msg` + `make install-hooks`.
+
+## PHPStan Level 9
+
+- No `@phpstan-ignore` without explanatory comment
+- No `mixed` without justification
+- `@param array{key: type}` for shaped arrays
+- `@param list<string>` for indexed string arrays
+- Fully typed return values: `?EditorConfig`, `?SyncContext`
+
+## PHP-CS-Fixer
+
+- `@Symfony` + `@PHP82Migration`
+- `declare_strict_types` enforced
+- `native_function_invocation` with `@compiler_optimized`
+- `trailing_comma_in_multiline` on arguments, parameters, match, arrays
+- `ordered_imports` alphabetical
+- Always use `.php-cs-fixer.dist.php` (not `.php-cs-fixer.php`)
+
+## GrumPHP
+
+Pre-commit hooks must mirror CI (except security): phpstan, phpcsfixer, phpunit, deptrac, infection. Same thresholds as Makefile.
+Note: `composer_audit` is NOT a valid GrumPHP task — use `make security-check` separately.
+
+## Deptrac
+
+Architecture layers matching `src/Composer/` structure:
+
+```yaml
+layers:
+  - name: Contract
+    collectors:
+      - type: directory
+        value: src/Composer/Contract/.*
+  - name: Config
+    collectors:
+      - type: directory
+        value: src/Composer/Config/.*
+  - name: Context
+    collectors:
+      - type: directory
+        value: src/Composer/Context/.*
+  - name: Converter
+    collectors:
+      - type: directory
+        value: src/Composer/Converter/.*
+  - name: Installer
+    collectors:
+      - type: directory
+        value: src/Composer/Installer/.*
+  - name: Root
+    collectors:
+      - type: directory
+        value: src/Composer/[^/]*
+ruleset:
+    Contract: [Config, Context]
+  Converter: [Contract]
+  Config: [Contract, Converter]
+  Context: [Contract]
+  Installer: [Contract, Config, Context]
+  Root: [Contract, Config, Context, Converter, Installer]
+```
+
+Rules: Contract depends on Config and Context (interfaces reference value objects in return types). Converter depends only on Contract. Config depends on Contract + Converter. Installer never reaches into Converter directly — only through EditorConfig.contentConverter.
+
+## Infection
+
+- MSI >= 70%
+- `--only-covered`, threads max
+- Always run after `make test`
+
+## CI (GitHub Actions)
+
+- Jobs: security, cs, phpstan, deptrac (parallel) → tests (matrix) → infection
+- Matrix: PHP 8.2, 8.3, 8.4 × Composer 2, 3
+- `fail-fast: false` on test matrix
+- No Symfony version matrix (this is not a Symfony bundle)
+
+## .gitignore essentials
+
+```
+/vendor/
+composer.lock
+.phpstan-cache/
+.php-cs-fixer.cache
+.deptrac.cache
+.phpunit.result.cache
+infection.log
+infection-summary.log
+phpunit.xml
+phpstan.neon
+*.log
+```
+
+## Anti-Patterns
+
+- Calling `vendor/bin/` directly instead of Makefile targets
+- `phpstan.neon` instead of `.dist` (overridden locally)
+- MSI < 50% (tests don't verify behavior)
+- No `composer audit` in CI
+- No Deptrac (architecture erodes)
+- `composer_audit` in grumphp.yml (task does not exist)

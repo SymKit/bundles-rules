@@ -1,0 +1,84 @@
+---
+description: Testing patterns for the Composer plugin test suite
+globs: tests/**/*.php
+alwaysApply: false
+---
+
+# Test Conventions
+
+## General
+
+- `declare(strict_types=1)` in test files
+- Structure: `tests/Unit/` for pure logic, `tests/Integration/` for filesystem operations
+- PHPUnit 10+ or 11+
+
+## Minimum Required Tests
+
+### Unit Tests (no filesystem)
+
+- `FrontmatterConverter::parseMdc()` — parse frontmatter + body extraction
+- `FrontmatterConverter::toClaudeFormat()` — alwaysApply rules, glob-scoped rules, skill files
+- `FrontmatterConverter::toWindsurfFormat()` — strip all frontmatter
+- `ClaudeFormatConverter::convert()` — delegates to FrontmatterConverter
+- `WindsurfFormatConverter::convert()` — delegates to FrontmatterConverter
+- `IdentityConverter::convert()` — returns content unchanged
+- `DefaultEditorConfigProvider::get()` — returns correct config per editor, null for unknown
+- `EditorConfig` — value object construction and property access
+- `SyncContext` — value object construction and property access
+
+### Integration Tests (real filesystem)
+
+- `AiRulesInstaller::sync()` with temp directories:
+  - Creates rules in target dir for each editor
+  - Converts `.mdc` to `.md` for Claude/Windsurf
+  - Copies non-`.mdc` files as-is (e.g. `scaffold_bundle.php`)
+  - Copies only selected skills
+  - Never deletes existing files in target (merge-only)
+  - Skips unknown editor names gracefully
+
+## Temp Directory Pattern
+
+```php
+private string $tempDir;
+
+protected function setUp(): void
+{
+    $this->tempDir = \sys_get_temp_dir() . '/ai-rules-test-' . \bin2hex(\random_bytes(4));
+    \mkdir($this->tempDir, 0755, true);
+}
+
+protected function tearDown(): void
+{
+    $this->removeDirectory($this->tempDir);
+}
+
+private function removeDirectory(string $dir): void
+{
+    if (!\is_dir($dir)) {
+        return;
+    }
+    $items = new \RecursiveIteratorIterator(
+        new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
+        \RecursiveIteratorIterator::CHILD_FIRST,
+    );
+    foreach ($items as $item) {
+        $item->isDir() ? \rmdir($item->getPathname()) : \unlink($item->getPathname());
+    }
+    \rmdir($dir);
+}
+```
+
+## Test Helpers
+
+- Create `.mdc` source files with known content in temp dirs
+- Assert target file exists and content matches expected conversion
+- Use `self::assertFileExists()`, `self::assertStringEqualsFile()`
+
+## PHPUnit Configuration
+
+- `failOnRisky="true"` in `phpunit.xml.dist`
+- Separate testsuites for Unit and Integration if needed
+
+## After Every Change
+
+Run `make test` then `make infection` to verify coverage and mutation score.

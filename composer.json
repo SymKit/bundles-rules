@@ -1,6 +1,6 @@
 {
-    "name": "seb/symfony-bundle-cursor-kit",
-    "description": "Cursor AI rules and optional skills for building Symfony bundles (best practices, SOLID, AbstractBundle, quality tooling)",
+    "name": "symkit/bundle-ai-kit",
+    "description": "AI rules and optional skills for building Symfony bundles (best practices, SOLID, AbstractBundle, quality tooling)",
     "type": "composer-plugin",
     "version": "0.0.1",
     "authors": [
@@ -14,12 +14,33 @@
         "php": ">=8.2",
         "composer-plugin-api": "^2.0 || ^3.0"
     },
+    "require-dev": {
+        "composer/composer": "^2.0 || ^3.0",
+        "phpstan/phpstan": "^2.1",
+        "friendsofphp/php-cs-fixer": "^3.68",
+        "phpunit/phpunit": "^11.5",
+        "infection/infection": "^0.29",
+        "qossmic/deptrac": "^2.0",
+        "phpro/grumphp": "^2.10"
+    },
     "autoload": {
         "psr-4": {
-            "Seb\\SymfonyBundleCursorKit\\Composer\\": "src/Composer/"
+            "Symkit\\BundleAiKit\\Composer\\": "src/Composer/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Symkit\\BundleAiKit\\Tests\\": "tests/"
         }
     },
     "extra": {
-        "class": "Seb\\SymfonyBundleCursorKit\\Composer\\Plugin"
+        "class": "Symkit\\BundleAiKit\\Composer\\Plugin"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "phpro/grumphp": true,
+            "infection/extension-installer": true
+        }
     }
 }

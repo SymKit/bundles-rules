@@ -1,0 +1,11 @@
+/vendor/
+composer.lock
+.phpstan-cache/
+.php-cs-fixer.cache
+.deptrac.cache
+.phpunit.result.cache
+infection.log
+infection-summary.log
+phpunit.xml
+phpstan.neon
+*.log

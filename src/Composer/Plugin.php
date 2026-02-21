@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Seb\SymfonyBundleCursorKit\Composer;
+namespace Symkit\BundleAiKit\Composer;
 
 use Composer\Composer;
 use Composer\EventDispatcher\EventSubscriberInterface;
@@ -11,10 +11,27 @@ use Composer\Plugin\Capable;
 use Composer\Plugin\PluginInterface;
 use Composer\Script\Event;
 use Composer\Script\ScriptEvents;
+use Symkit\BundleAiKit\Composer\Config\DefaultEditorConfigProvider;
+use Symkit\BundleAiKit\Composer\Context\DefaultSyncContextResolver;
+use Symkit\BundleAiKit\Composer\Contract\SyncContextResolverInterface;
+use Symkit\BundleAiKit\Composer\Installer\AiRulesInstaller;
 
+/**
+ * Composer plugin: syncs AI rules/skills into project .cursor/, .claude/, .windsurf/.
+ * Delegates context resolution (SRP) and sync (SRP) to injected abstractions (DIP).
+ */
 final class Plugin implements PluginInterface, Capable, EventSubscriberInterface
 {
-    private const PACKAGE_NAME = 'seb/symfony-bundle-cursor-kit';
+    public function __construct(
+        ?SyncContextResolverInterface $contextResolver = null,
+        ?AiRulesInstaller $installer = null,
+    ) {
+        $this->contextResolver = $contextResolver ?? DefaultSyncContextResolver::forBundleAiKit();
+        $this->installer = $installer ?? new AiRulesInstaller(DefaultEditorConfigProvider::create());
+    }
+
+    private readonly SyncContextResolverInterface $contextResolver;
+    private readonly AiRulesInstaller $installer;
 
     public function activate(Composer $composer, IOInterface $io): void
     {
@@ -41,44 +58,18 @@ final class Plugin implements PluginInterface, Capable, EventSubscriberInterface
     public static function getSubscribedEvents(): array
     {
         return [
-            ScriptEvents::POST_INSTALL_CMD => 'syncCursorFiles',
-            ScriptEvents::POST_UPDATE_CMD => 'syncCursorFiles',
+            ScriptEvents::POST_INSTALL_CMD => 'syncAiFiles',
+            ScriptEvents::POST_UPDATE_CMD => 'syncAiFiles',
         ];
     }
 
-    public function syncCursorFiles(Event $event): void
+    public function syncAiFiles(Event $event): void
     {
-        $composer = $event->getComposer();
-        $installationManager = $composer->getInstallationManager();
-        $localRepo = $composer->getRepositoryManager()->getLocalRepository();
-
-        $package = null;
-        foreach ($localRepo->getPackages() as $pkg) {
-            if ($pkg->getName() === self::PACKAGE_NAME) {
-                $package = $pkg;
-                break;
-            }
-        }
-
-        if ($package === null) {
+        $context = $this->contextResolver->resolve($event);
+        if (null === $context) {
             return;
         }
 
-        $packagePath = $installationManager->getInstallPath($package);
-        if (!is_string($packagePath) || !is_dir($packagePath)) {
-            return;
-        }
-
-        $vendorDir = $composer->getConfig()->get('vendor-dir');
-        $projectRoot = realpath($vendorDir . '/..');
-        if ($projectRoot === false) {
-            return;
-        }
-
-        $rootPackage = $composer->getPackage();
-        $extra = $rootPackage->getExtra()['symfony-bundle-cursor-kit'] ?? [];
-        $skills = is_array($extra['skills'] ?? null) ? $extra['skills'] : [];
-
-        CursorRulesInstaller::sync($packagePath, $projectRoot, $skills);
+        $this->installer->sync($context);
     }
 }

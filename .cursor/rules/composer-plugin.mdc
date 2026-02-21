@@ -1,0 +1,92 @@
+---
+description: Composer plugin architecture, SOLID principles, multi-editor AI rules sync
+alwaysApply: true
+---
+
+# Composer Plugin Conventions — symkit/bundle-ai-kit
+
+## Project Identity
+
+- Composer plugin (`"type": "composer-plugin"`) named `symkit/bundle-ai-kit`
+- Installs AI rules and skills into consumer projects for Cursor, Claude Code, and Windsurf
+- Single source of truth: `ai/cursor/rules/` and `ai/cursor/skills/`
+- Runtime conversion from `.mdc` (Cursor) to `.md` (Claude, Windsurf) via `FrontmatterConverter`
+- Config read from consumer's `extra.bundle-ai-kit` in `composer.json`
+
+## Architecture — SOLID by Design
+
+```
+src/Composer/
+├── Plugin.php                          # Entry point (Composer hooks)
+├── Contract/                           # Interfaces (DIP)
+│   ├── ContentConverterInterface.php
+│   ├── EditorConfigProviderInterface.php
+│   └── SyncContextResolverInterface.php
+├── Config/                             # Editor config value objects
+│   ├── EditorConfig.php
+│   └── DefaultEditorConfigProvider.php
+├── Context/                            # Sync context resolution
+│   ├── SyncContext.php
+│   └── DefaultSyncContextResolver.php
+├── Converter/                          # Content conversion strategies
+│   ├── FrontmatterConverter.php
+│   ├── ClaudeFormatConverter.php
+│   ├── WindsurfFormatConverter.php
+│   └── IdentityConverter.php
+└── Installer/                          # File sync engine
+    └── AiRulesInstaller.php
+```
+
+## SOLID
+
+- **S**: Plugin only wires events. Resolver only resolves context. Installer only syncs files. Converters only transform content.
+- **O**: New editor = new `ContentConverterInterface` + new entry in `EditorConfigProviderInterface`. Installer untouched.
+- **L**: Any `ContentConverterInterface` implementation is substitutable (Identity, Claude, Windsurf).
+- **I**: Three focused interfaces: `ContentConverterInterface` (convert), `EditorConfigProviderInterface` (get config), `SyncContextResolverInterface` (resolve context).
+- **D**: `AiRulesInstaller` depends on `EditorConfigProviderInterface`, not on `DefaultEditorConfigProvider`. `Plugin` depends on `SyncContextResolverInterface`, not on `DefaultSyncContextResolver`.
+
+## Composer Plugin API
+
+- Plugin implements `PluginInterface`, `Capable`, `EventSubscriberInterface`
+- Hooks: `POST_INSTALL_CMD`, `POST_UPDATE_CMD` → `syncAiFiles()`
+- Composer instantiates Plugin with no args → constructor uses optional parameters with defaults
+- Package resolution: iterate `$localRepo->getPackages()` to find self by `PACKAGE_NAME`
+- Project root: `realpath($vendorDir . '/..')`
+
+## Multi-Editor Support
+
+| Editor   | Rules destination         | Skills destination             | Format |
+|----------|--------------------------|--------------------------------|--------|
+| Cursor   | `.cursor/rules/`         | `.cursor/skills/{name}/`       | `.mdc` |
+| Claude   | `.claude/rules/`         | `.claude/rules/skills/{name}/` | `.md`  |
+| Windsurf | `.windsurf/rules/`       | `.windsurf/rules/skills/{name}/` | `.md` |
+
+Default: `editors: ["cursor"]`. User opts in via `extra.bundle-ai-kit.editors`.
+
+## Value Objects
+
+- `EditorConfig`: readonly, holds rulesDir, skillsDir, fileExtension, ?ContentConverterInterface
+- `SyncContext`: readonly, holds packagePath, projectRoot, editors[], skills[]
+- Never mutate after construction. No setters.
+
+## Dependencies
+
+- `php: >=8.2`, `composer-plugin-api: ^2.0 || ^3.0`
+- Zero runtime dependencies beyond Composer
+- Dev: PHPStan, PHP-CS-Fixer, PHPUnit, Infection, Deptrac, GrumPHP
+
+## Commits
+
+Never reference the agent or any co-author (no Co-authored-by, Signed-off-by from the AI). Commit messages describe only the change. Never use `git commit --trailer`.
+
+If the IDE adds Co-authored-by automatically, use a commit-msg hook in `scripts/git-hooks/commit-msg` that strips matching lines, with `make install-hooks` to install it.
+
+## After Every Change — Makefile First
+
+Always use Makefile targets. Never call `vendor/bin/` directly.
+
+- `make cs-fix` — fix code style
+- `make phpstan` — static analysis
+- `make test` — run tests
+- `make quality` — full pipeline (cs-check + phpstan + deptrac + lint + test + infection)
+- `make ci` — security-check + quality

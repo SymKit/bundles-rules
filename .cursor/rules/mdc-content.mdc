@@ -1,0 +1,66 @@
+---
+description: Conventions for writing .mdc rule and skill files distributed by the plugin
+globs: ai/**/*.mdc
+alwaysApply: false
+---
+
+# MDC Content Conventions
+
+These rules govern the `.mdc` files in `ai/cursor/` that the plugin distributes to consumer projects.
+
+## Frontmatter — Rules
+
+```yaml
+---
+description: Short description of what the rule covers
+globs: src/**/*.php
+alwaysApply: false
+---
+```
+
+- `description` (required): one-line summary, no quotes needed unless it contains colons
+- `alwaysApply: true`: rule loads in every interaction (use for the main project rule only)
+- `alwaysApply: false` + `globs`: rule activates when matching files are edited
+- `globs` supports CSV: `Makefile, grumphp.yml, .github/**/*.yml`
+
+## Frontmatter — Skills
+
+```yaml
+---
+name: skill-name
+description: "Detailed trigger description with keywords in quotes"
+---
+```
+
+- `name` (required): kebab-case, matches the directory name
+- `description` (required): include trigger phrases so the AI activates the skill at the right time
+- Wrap description in quotes when it contains colons or special YAML characters
+
+## Body Format
+
+- Markdown with `#` headings (H1 for title, H2+ for sections)
+- Code examples in fenced blocks with language tag
+- Anti-patterns in tables: `| Anti-Pattern | Impact |`
+- Concrete, actionable rules — no prose or filler
+- Each section should be self-contained
+
+## Conversion Compatibility
+
+The body must render correctly as plain Markdown (for Claude Code and Windsurf):
+
+- No Cursor-specific syntax in the body (frontmatter is stripped for other editors)
+- No references to `.mdc` format or Cursor features
+- Skill cross-references: use plain text like "see the `symfony-bundle-quality` skill" (not links to .mdc files, which won't exist in Claude/Windsurf)
+
+## File Naming
+
+- Rules: `kebab-case.mdc` (e.g. `php-bundle-code.mdc`, `bundle-quality.mdc`)
+- Skills: `SKILL.mdc` as main file, additional files in kebab-case (e.g. `advanced-patterns.mdc`)
+- Non-MDC files in skills (e.g. `scaffold_bundle.php`) are copied as-is without conversion
+
+## Content Guidelines
+
+- One rule per concern (code style, tests, quality, etc.)
+- Skills cover larger topics (creating a bundle, setting up Doctrine, etc.)
+- Include an "After Every Change" section with the relevant `make` targets
+- Include a "Forbidden" or "Anti-Patterns" section for common mistakes

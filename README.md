@@ -1,14 +1,22 @@
-# Symfony Bundle Cursor Kit
+# Symfony Bundle AI Kit
 
-Cursor AI rules and optional skills for building Symfony bundles with best practices: SOLID, AbstractBundle, Contract pattern, and quality tooling (PHPStan 9, GrumPHP, Infection, Deptrac, CI).
+AI rules and optional skills for building Symfony bundles with best practices: SOLID, AbstractBundle, Contract pattern, and quality tooling (PHPStan 9, GrumPHP, Infection, Deptrac, CI).
 
-**By default** the Composer plugin installs **all 7 rules** into your project’s `.cursor/rules/` and **no skills**. You can enable specific skills via `composer.json` (see [Configuration](#configuration)). User-added files in `.cursor/` are never removed; the plugin only merges or overwrites its own files.
+Supports **Cursor**, **Claude Code**, and **Windsurf** from a single source of truth.
+
+**By default** the Composer plugin installs **all 7 rules** for **Cursor** into your project and **no skills**. You can enable additional editors and specific skills via `composer.json` (see [Configuration](#configuration)). User-added files are never removed; the plugin only merges or overwrites its own files.
 
 ## Requirements
 
-- [Cursor IDE](https://cursor.com/)
 - PHP 8.2+
 - Composer 2.x or 3.x
+- At least one supported AI editor:
+
+| Editor | Rules location | Skills location |
+|--------|---------------|-----------------|
+| [Cursor](https://cursor.com/) | `.cursor/rules/*.mdc` | `.cursor/skills/` |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `.claude/rules/*.md` | `.claude/rules/skills/` |
+| [Windsurf](https://windsurf.com/) | `.windsurf/rules/*.md` | `.windsurf/rules/skills/` |
 
 ## Installation
 
@@ -22,11 +30,11 @@ Add the package as a dev dependency and allow the plugin.
         { "type": "path", "url": "./bundles-rules" }
     ],
     "require-dev": {
-        "seb/symfony-bundle-cursor-kit": "*"
+        "symkit/bundle-ai-kit": "*"
     },
     "config": {
         "allow-plugins": {
-            "seb/symfony-bundle-cursor-kit": true
+            "symkit/bundle-ai-kit": true
         }
     }
 }
@@ -40,11 +48,11 @@ Add the package as a dev dependency and allow the plugin.
         { "type": "vcs", "url": "https://github.com/your-org/bundles-rules" }
     ],
     "require-dev": {
-        "seb/symfony-bundle-cursor-kit": "^1.0"
+        "symkit/bundle-ai-kit": "^1.0"
     },
     "config": {
         "allow-plugins": {
-            "seb/symfony-bundle-cursor-kit": true
+            "symkit/bundle-ai-kit": true
         }
     }
 }
@@ -53,25 +61,48 @@ Add the package as a dev dependency and allow the plugin.
 Then run:
 
 ```bash
-composer update seb/symfony-bundle-cursor-kit
+composer update symkit/bundle-ai-kit
 ```
 
-On every `composer install` or `composer update`, the plugin syncs the kit’s rules (and any enabled skills) into your project’s `.cursor/` directory, so rules stay up to date without manual copy/paste.
+On every `composer install` or `composer update`, the plugin syncs the kit's rules (and any enabled skills) into the appropriate directories for each configured editor.
 
 ## Configuration
 
-Configuration is optional and lives under `extra.symfony-bundle-cursor-kit` in your bundle’s `composer.json`.
+Configuration is optional and lives under `extra.bundle-ai-kit` in your bundle's `composer.json`.
+
+### Choosing editors
+
+By default only **Cursor** is enabled. To add Claude Code and/or Windsurf, set the `editors` array:
+
+```json
+{
+    "extra": {
+        "bundle-ai-kit": {
+            "editors": ["cursor", "claude", "windsurf"]
+        }
+    }
+}
+```
+
+Valid values: `"cursor"`, `"claude"`, `"windsurf"`.
+
+The plugin reads rules from a single source (`ai/cursor/`) and converts the frontmatter format automatically for each target editor:
+
+- **Cursor** — copies `.mdc` files as-is
+- **Claude Code** — converts to `.md` with `globs:` frontmatter for path-scoped rules
+- **Windsurf** — converts to `.md` with no frontmatter (plain markdown)
 
 ### Enabling skills
 
-By default **no skills** are installed. To enable specific skills, set the `skills` array to the skill directory names you want.
+By default **no skills** are installed. To enable specific skills, set the `skills` array:
 
 **Enable all skills** (most common):
 
 ```json
 {
     "extra": {
-        "symfony-bundle-cursor-kit": {
+        "bundle-ai-kit": {
+            "editors": ["cursor", "claude", "windsurf"],
             "skills": [
                 "symfony-bundle-core",
                 "symfony-bundle-ux",
@@ -84,7 +115,7 @@ By default **no skills** are installed. To enable specific skills, set the `skil
 }
 ```
 
-To enable only some skills, use a subset of the list above (e.g. `["symfony-bundle-core", "symfony-bundle-ux"]`).
+To enable only some skills, use a subset (e.g. `["symfony-bundle-core", "symfony-bundle-ux"]`).
 
 Available skills:
 
@@ -96,38 +127,38 @@ Available skills:
 | `symfony-bundle-flex` | Flex recipes, `manifest.json` |
 | `symfony-bundle-quality` | Makefile, PHPStan 9, GrumPHP, Infection, Deptrac, CI |
 
-Only the skills you list are copied into `.cursor/skills/`. Omit `skills` or use an empty array to install rules only.
+Skills are installed into the editor-specific skills directory (e.g. `.cursor/skills/`, `.claude/rules/skills/`, `.windsurf/rules/skills/`).
 
 ## What you get
 
 ### Rules (always installed)
 
-All 7 rules are merged into your project’s `.cursor/rules/`. The plugin never deletes files you added yourself.
+All 7 rules are merged into the rules directory of each configured editor. The plugin never deletes files you added yourself.
 
 | Rule | Scope | When it applies |
 |------|--------|------------------|
-| `symfony-bundle.mdc` | `alwaysApply` | Every interaction — SOLID, AbstractBundle, Contract pattern |
-| `php-bundle-code.mdc` | `src/**/*.php` | Editing PHP source |
-| `xml-config.mdc` | `config/**/*.xml` | Editing XML (services, Doctrine) |
-| `bundle-tests.mdc` | `tests/**/*.php` | Editing tests |
-| `bundle-ux.mdc` | `assets/**/*.js`, `*.ts` | Editing JS/TS assets |
-| `twig-bundle.mdc` | `templates/**/*.twig` | Editing Twig templates |
-| `bundle-quality.mdc` | Makefile, CI configs… | Editing quality/CI files |
+| `symfony-bundle` | Always | Every interaction — SOLID, AbstractBundle, Contract pattern |
+| `php-bundle-code` | `src/**/*.php` | Editing PHP source |
+| `xml-config` | `config/**/*.xml` | Editing XML (services, Doctrine) |
+| `bundle-tests` | `tests/**/*.php` | Editing tests |
+| `bundle-ux` | `assets/**/*.js`, `*.ts` | Editing JS/TS assets |
+| `twig-bundle` | `templates/**/*.twig` | Editing Twig templates |
+| `bundle-quality` | Makefile, CI configs | Editing quality/CI files |
 
 ### Skills (opt-in)
 
-Skills are only installed when listed in `extra.symfony-bundle-cursor-kit.skills`. They provide deeper guidance for specific tasks (e.g. “create a bundle”, “add a Stimulus controller”, “set up Flex recipe”).
+Skills are only installed when listed in `extra.bundle-ai-kit.skills`. They provide deeper guidance for specific tasks (e.g. "create a bundle", "add a Stimulus controller", "set up Flex recipe").
 
 ### Merge-only behaviour
 
-The plugin only copies or overwrites files that exist in the kit. It never removes or replaces files or directories you added in `.cursor/` (e.g. custom rules or skills).
+The plugin only copies or overwrites files that exist in the kit. It never removes or replaces files or directories you added yourself (e.g. custom rules or skills).
 
 ## Scaffolding a new bundle (optional)
 
-The repo includes a standalone script to generate a full bundle skeleton with quality tooling, Makefile, and CI:
+The `symfony-bundle-core` skill includes a standalone script to generate a full bundle skeleton with quality tooling, Makefile, and CI:
 
 ```bash
-php scripts/scaffold_bundles.php Acme Blog --with-doctrine --with-ux
+php vendor/symkit/bundle-ai-kit/ai/cursor/skills/symfony-bundle-core/scaffold_bundle.php Acme Blog --with-doctrine --with-ux
 ```
 
 Options:
@@ -136,16 +167,20 @@ Options:
 - `--with-ux` — AssetMapper, Stimulus controllers, Twig Components
 - `--with-flex` — Flex recipe skeleton
 
-The generated bundle includes Makefile, PHPStan 9, PHP-CS-Fixer, GrumPHP, Infection, Deptrac, `.editorconfig`, and GitHub Actions CI. You can then add this kit as a dev dependency and get Cursor rules in sync via Composer.
-
 ## .gitignore in your bundle
+
+Choose which AI editor directories to ignore. Add any combination of:
+
+```gitignore
+.cursor/
+.claude/
+.windsurf/
+```
 
 Either:
 
-- **Ignore** `.cursor/` in your bundle so each dev (and CI) gets rules via `composer install`, or  
-- **Commit** `.cursor/` after the first install so everyone has rules without running the plugin every time; run `composer update seb/symfony-bundle-cursor-kit` when you want to refresh.
-
-Document this choice in your own README if relevant.
+- **Ignore** the directories so each dev gets rules via `composer install`, or
+- **Commit** them after the first install so everyone has rules immediately; run `composer update symkit/bundle-ai-kit` to refresh.
 
 ## Contributing
 

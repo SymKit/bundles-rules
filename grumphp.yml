@@ -1,0 +1,19 @@
+grumphp:
+    tasks:
+        phpstan:
+            configuration: phpstan.neon.dist
+            memory_limit: '-1'
+        phpcsfixer:
+            config: .php-cs-fixer.dist.php
+            allow_risky: true
+        phpunit:
+            config_file: phpunit.xml.dist
+            always_execute: true
+        deptrac:
+            depfile: deptrac.yaml
+        infection:
+            configuration: infection.json5
+            min_msi: 70
+            min_covered_msi: 70
+            only_covered: true
+            threads: 4

@@ -1,0 +1,7 @@
+#!/bin/sh
+#
+# Strips Co-authored-by and Signed-off-by trailers added by AI editors.
+#
+
+sed -i '/^Co-authored-by:/d' "$1"
+sed -i '/^Signed-off-by:/d' "$1"
