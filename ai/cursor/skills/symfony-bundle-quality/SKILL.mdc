@@ -131,15 +131,35 @@ After every change: `make cs-fix`
 grumphp:
     tasks:
         phpstan:
-            config: phpstan.neon.dist
+            configuration: phpstan.neon.dist
             memory_limit: 512M
+            use_grumphp_paths: false
         phpcsfixer:
             config: .php-cs-fixer.dist.php
         phpunit:
-            config: phpunit.xml.dist
+            config_file: phpunit.xml.dist
+        shell:
+            scripts:
+                deptrac: ["./scripts/deptrac.sh"]
+        infection:
+            min_msi: 70
+            min_covered_msi: 75
+            only_covered: true
+            threads: 4
 ```
 
 Pre-commit hooks prevent non-conforming commits.
+
+> **Deptrac via `shell` task**: There is no native GrumPHP `deptrac` task that works reliably. The only way to run Deptrac correctly in GrumPHP is through a `shell` script. Always use the `shell` task pointing to `scripts/deptrac.sh`.
+
+### Deptrac shell script (`scripts/deptrac.sh`)
+
+```sh
+#!/bin/sh
+php vendor/bin/deptrac analyse --no-progress
+```
+
+Make the script executable: `chmod +x scripts/deptrac.sh`.
 
 > **Note**: `composer_audit` is NOT a valid GrumPHP task — do not add it. Run `make security-check` separately.
 
