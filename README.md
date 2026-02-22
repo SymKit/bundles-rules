@@ -1,5 +1,9 @@
 # Symfony Bundle AI Kit
 
+[![CI](https://github.com/symkit/bundle-ai-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/symkit/bundle-ai-kit/actions)
+[![Latest Version](https://img.shields.io/packagist/v/symkit/bundle-ai-kit.svg)](https://packagist.org/packages/symkit/bundle-ai-kit)
+[![PHPStan Level 9](https://img.shields.io/badge/PHPStan-level%209-brightgreen.svg)](https://phpstan.org/)
+
 AI rules and optional skills for building Symfony bundles with best practices: SOLID, AbstractBundle, Contract pattern, and quality tooling (PHPStan 9, GrumPHP, Infection, Deptrac, CI).
 
 Supports **Cursor**, **Claude Code**, **Windsurf**, and **Google Antigravity** from a single source of truth.
