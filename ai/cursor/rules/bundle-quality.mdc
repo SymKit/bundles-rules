@@ -16,6 +16,7 @@ Never call `vendor/bin/` directly — always use `make` targets:
 - `make phpstan` — static analysis level 9
 - `make test` — run PHPUnit
 - `make deptrac` — architecture enforcement
+- `make lint` — `composer validate --strict`
 - `make infection` — mutation testing
 - `make security-check` — `composer audit --abandoned=report`
 - `make quality` — full pipeline (cs-check + phpstan + deptrac + lint + test + infection)
