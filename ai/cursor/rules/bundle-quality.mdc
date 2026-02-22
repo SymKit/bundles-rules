@@ -71,11 +71,10 @@ grumphp:
             config: .php-cs-fixer.dist.php
         phpunit:
             config_file: phpunit.xml.dist
-        infection:
-            min_covered_msi: 65
-            only_covered: true
-            threads: 4
-            test_framework: phpunit
+        shell:
+            scripts:
+                - ['-c', 'make infection']
+            triggered_by: [php]
 ```
 
 > **Deptrac via `make` task**: Use the GrumPHP `make` task with `task: deptrac` to delegate to the Makefile target. This avoids needing a separate shell script.
