@@ -172,7 +172,26 @@ Bundles must NOT ship migrations. Ship XML mapping files. Document that users sh
 
 ---
 
-## 9. Anti-Patterns
+## 9. Configurable Entity & Repository Classes
+
+The host app must be able to **replace entity and repository classes** via bundle configuration. Never hardcode entity or repository classes in services or queries.
+
+In `configure()`:
+```php
+->arrayNode('entity')
+    ->addDefaultsIfNotSet()
+    ->children()
+        ->scalarNode('article_class')->defaultValue(Article::class)->end()
+        ->scalarNode('article_repository_class')->defaultValue(ArticleRepository::class)->end()
+    ->end()
+->end()
+```
+
+In `loadExtension()`, bind these as parameters (`acme_blog.entity.article_class`) and inject them into services. Repositories must use the configured class, not `Article::class` directly.
+
+This allows the host app to extend entities (e.g. add fields) and provide custom repositories without forking the bundle.
+
+## 10. Anti-Patterns
 
 | Anti-Pattern | Impact |
 |---|---|
@@ -181,10 +200,11 @@ Bundles must NOT ship migrations. Ship XML mapping files. Document that users sh
 | Shipping migrations | App-specific, break on different DB states |
 | `auto_mapping` without fallback | Fragile |
 | Doctrine optional but used unconditionally | Runtime crash |
+| Hardcoded entity/repository classes in services | Host can't customize |
 
 ---
 
-## 9.5. Critical Rules (Before Checklist)
+## 10.5. Critical Rules (Before Checklist)
 
 - **UUID v7 or Ulid** as public identifiers if bundle exposes entities via API. Never expose auto-increment IDs.
 - **Typed collections**: `/** @var Collection<int, Entity> */` mandatory (PHPStan level 9)
@@ -192,7 +212,7 @@ Bundles must NOT ship migrations. Ship XML mapping files. Document that users sh
 
 ---
 
-## 10. Generation Checklist
+## 11. Generation Checklist
 
 1. Clean POPO entities in `src/Entity/` with typed collections
 2. XML mapping in `config/doctrine/{Entity}.orm.xml`
@@ -203,3 +223,4 @@ Bundles must NOT ship migrations. Ship XML mapping files. Document that users sh
 7. UUID/Ulid for public API identifiers
 8. Document migration generation
 9. Integration tests with in-memory SQLite
+10. Entity and repository classes configurable via `configure()`

@@ -194,7 +194,14 @@ Use YAML/XML files in `config/routes.yaml`, not PHP attributes. Prefix all route
 
 ## 9. Translations (XLIFF)
 
-XLIFF (.xlf) mandatory. Own domain (`AcmeBlogBundle`). Never overwrite other domains.
+**Every user-facing string must be translated** — no hardcoded text in templates, controllers, forms, validators, or flash messages.
+
+- XLIFF (.xlf) mandatory. Own domain (`AcmeBlogBundle`). Never overwrite other domains.
+- Extract **all** strings: Twig (`{% trans %}`, `|trans`), form labels/help/placeholders, constraint messages, controller flash messages, email subjects/bodies, error pages
+- Always provide at least `en` and `fr` locales
+- Form labels: always explicit `'label' => 'form.field_name'`, never rely on auto-generated labels
+- Validator messages: always use translation keys (`'message' => 'validation.field.constraint'`)
+- Run `translation:extract` regularly to catch missing keys
 
 ---
 
@@ -204,7 +211,16 @@ Use `nyholm/symfony-bundle-test`. Always generate at least one integration test.
 
 ---
 
-## 11. Anti-Patterns Checklist
+## 11. Configurability
+
+Every feature of a bundle must be **activatable, deactivatable, and configurable** via `configure()`:
+
+- Enable/disable any feature (Doctrine, controllers, Twig components, listeners, etc.) via a boolean config key
+- Override Doctrine entity classes and repository classes in config (see `symfony-bundle-doctrine` skill)
+- Customize any default value (table prefix, translation domain, route prefix, etc.)
+- The host app must never need to fork the bundle to customize behavior
+
+## 12. Anti-Patterns Checklist
 
 | Anti-Pattern | Impact |
 |---|---|
@@ -219,10 +235,13 @@ Use `nyholm/symfony-bundle-test`. Always generate at least one integration test.
 | Business logic in controller/entity | SRP violation |
 | Service class without `final` | Fragile inheritance |
 | `mixed` without justification | PHPStan level 9 violation |
+| Hardcoded entity/repository classes | Host can't customize |
+| Non-translatable user-facing strings | Breaks i18n |
+| Features that cannot be disabled | Host can't tailor bundle |
 
 ---
 
-## 12. Generating a Bundle
+## 13. Generating a Bundle
 
 1. Ask for: vendor name, purpose, Symfony components, Doctrine?, assets?, Twig components?
 2. Scaffold full directory structure (use [scaffold_bundle.php](scaffold_bundle.php))

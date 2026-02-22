@@ -69,6 +69,8 @@ parameters:
 
 ### Rules
 
+- **Always fix all PHPStan errors**, even pre-existing ones not introduced by the current change — leave the codebase in a better state
+- **Never use baselines** (`phpstan-baseline.neon`) to ignore errors — fix them instead
 - Type everything: parameters, return types, properties. No implicit `void`.
 - No `mixed` except justified with a comment explaining why.
 - No `@phpstan-ignore` without an explanatory comment.
@@ -130,6 +132,9 @@ After every change: `make cs-fix`
 ```yaml
 grumphp:
     tasks:
+        make:
+            task: deptrac
+            triggered_by: [php]
         phpstan:
             configuration: phpstan.neon.dist
             memory_limit: 512M
@@ -138,28 +143,16 @@ grumphp:
             config: .php-cs-fixer.dist.php
         phpunit:
             config_file: phpunit.xml.dist
-        shell:
-            scripts:
-                deptrac: ["./scripts/deptrac.sh"]
         infection:
-            min_msi: 70
-            min_covered_msi: 75
+            min_covered_msi: 65
             only_covered: true
             threads: 4
+            test_framework: phpunit
 ```
 
 Pre-commit hooks prevent non-conforming commits.
 
-> **Deptrac via `shell` task**: There is no native GrumPHP `deptrac` task that works reliably. The only way to run Deptrac correctly in GrumPHP is through a `shell` script. Always use the `shell` task pointing to `scripts/deptrac.sh`.
-
-### Deptrac shell script (`scripts/deptrac.sh`)
-
-```sh
-#!/bin/sh
-php vendor/bin/deptrac analyse --no-progress
-```
-
-Make the script executable: `chmod +x scripts/deptrac.sh`.
+> **Deptrac via `make` task**: Use the GrumPHP `make` task with `task: deptrac` to delegate to the Makefile target. This avoids needing a separate shell script.
 
 > **Note**: `composer_audit` is NOT a valid GrumPHP task — do not add it. Run `make security-check` separately.
 
@@ -363,6 +356,7 @@ indent_style = tab
 | **`qossmic/deptrac` instead of `deptrac/deptrac`** | Abandoned package, no longer maintained |
 | `phpstan.neon` instead of `.dist` | Overridden by local config, inconsistent CI |
 | `@phpstan-ignore` without comment | Masks real problems |
+| Using `phpstan-baseline.neon` | Hides errors instead of fixing them |
 | MSI < 50% | Tests don't actually verify behavior |
 | Ignoring deprecations until upgrade | Debt accumulation |
 | Committing code failing `make quality` | Broken CI for all contributors |

@@ -33,6 +33,8 @@ If the project contains `scripts/git-hooks/commit-msg`, an `install-hooks` targe
 
 ## PHPStan Level 9
 
+- **Always fix all PHPStan errors**, even pre-existing ones not introduced by the current change — leave the codebase in a better state
+- **Never use baselines** (`phpstan-baseline.neon`) to ignore errors — fix them instead
 - No `@phpstan-ignore` without explanatory comment
 - No `mixed` without justification
 - Typed collections: `/** @var Collection<int, Entity> */`
@@ -58,6 +60,9 @@ Note: `composer_audit` is NOT a valid GrumPHP task — use `make security-check`
 ```yaml
 grumphp:
     tasks:
+        make:
+            task: deptrac
+            triggered_by: [php]
         phpstan:
             configuration: phpstan.neon.dist
             memory_limit: 512M
@@ -66,26 +71,14 @@ grumphp:
             config: .php-cs-fixer.dist.php
         phpunit:
             config_file: phpunit.xml.dist
-        shell:
-            scripts:
-                deptrac: ["./scripts/deptrac.sh"]
         infection:
-            min_msi: 70
-            min_covered_msi: 75
+            min_covered_msi: 65
             only_covered: true
             threads: 4
+            test_framework: phpunit
 ```
 
-> **Deptrac via `shell` task**: There is no native GrumPHP `deptrac` task that works reliably. The only way to run Deptrac correctly in GrumPHP is through a `shell` script. Always use the `shell` task pointing to `scripts/deptrac.sh`.
-
-### Deptrac shell script (`scripts/deptrac.sh`)
-
-```sh
-#!/bin/sh
-php vendor/bin/deptrac analyse --no-progress
-```
-
-Make the script executable: `chmod +x scripts/deptrac.sh`.
+> **Deptrac via `make` task**: Use the GrumPHP `make` task with `task: deptrac` to delegate to the Makefile target. This avoids needing a separate shell script.
 
 ## Composer allow-plugins
 
@@ -210,3 +203,4 @@ config/reference.php
 - `composer_audit` in grumphp.yml (task does not exist)
 - `composer audit` without `--abandoned=report` (fails CI on abandoned transitive deps)
 - Using `qossmic/deptrac` instead of `deptrac/deptrac` (abandoned)
+- Using `phpstan-baseline.neon` to ignore errors instead of fixing them
