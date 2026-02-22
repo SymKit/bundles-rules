@@ -1,4 +1,4 @@
-.PHONY: cs-fix cs-check phpstan test deptrac infection security-check quality ci install-hooks
+.PHONY: cs-fix cs-check phpstan test deptrac infection security-check quality ci
 
 cs-fix:
 	vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.dist.php --allow-risky=yes
@@ -24,7 +24,3 @@ security-check:
 quality: cs-check phpstan deptrac test infection
 
 ci: security-check quality
-
-install-hooks:
-	cp scripts/git-hooks/commit-msg .git/hooks/commit-msg
-	chmod +x .git/hooks/commit-msg

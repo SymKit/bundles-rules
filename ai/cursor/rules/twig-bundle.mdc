@@ -18,12 +18,18 @@ Always use Twig helpers — never manual `data-*` attributes (XSS protection, re
 
 ## Internationalization (i18n)
 
+**Every user-facing string must be translated** — no hardcoded text anywhere.
+
 - Use `{% trans_default_domain 'VendorNameBundle' %}` at the top of base templates to avoid repeating the domain
 - Child templates inherit the domain from `{% extends %}`
 - XLIFF files in `translations/` at bundle root (auto-discovered)
 - Translation keys: `error.404.heading`, `error.action.home` — dot-separated, descriptive
 - Always provide at least 2 locales (e.g. `fr` + `en`)
 - Dynamic locale: `lang="{{ app.request.locale|default('en') }}"` on `<html>`
+- **Extract all strings**: Twig (`{% trans %}`, `|trans`), form labels/help/placeholders, constraint messages, controller flash messages, email subjects/bodies, error pages
+- Form labels: always explicit `'label' => 'form.field_name'`, never rely on auto-generated labels
+- Validator messages: always use translation keys (`'message' => 'validation.field.constraint'`)
+- Run `translation:extract` regularly to catch missing keys
 
 ## Self-Contained Pages (Error Pages, Emails)
 
