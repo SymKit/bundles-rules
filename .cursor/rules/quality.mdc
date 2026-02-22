@@ -20,13 +20,11 @@ Never call `vendor/bin/` directly — always use `make` targets:
 - `make security-check` — `composer audit --abandoned=report`
 - `make quality` — full pipeline (cs-check + phpstan + deptrac + test + infection)
 - `make ci` — security-check + quality
-- `make install-hooks` — install git hook that strips Co-authored-by
-
 Never commit code that fails `make quality`.
 
 ## Commits (no self-attribution)
 
-Do not add Co-authored-by, Signed-off-by from the AI, or `git commit --trailer`. If the IDE adds Co-authored-by automatically, use `scripts/git-hooks/commit-msg` + `make install-hooks`.
+Do not add Co-authored-by, Signed-off-by from the AI, or `git commit --trailer`.
 
 ## PHPStan Level 9
 

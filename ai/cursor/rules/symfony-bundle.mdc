@@ -83,7 +83,15 @@ The `README.md` must always include the following badges at the top (replace `{v
 
 When committing, never reference the agent or any co-author (no Co-authored-by, Signed-off-by from the AI, or similar). Commit messages and metadata must describe only the change, with no self-attribution. Never use `git commit --trailer` or add Co-authored-by to commits.
 
-If the IDE (e.g. Cursor) keeps adding Co-authored-by automatically, add a **commit-msg hook** that strips it: put a script in `scripts/git-hooks/commit-msg` that removes lines matching `Co-authored-by:` (e.g. `grep -v -E '^[[:space:]]*Co-authored-by:' "$1"` into a temp file then replace the message file). Provide `make install-hooks` that copies `scripts/git-hooks/commit-msg` to `.git/hooks/commit-msg` and makes it executable. Document `make install-hooks` in README Contributing so contributors can install it too. This applies to any project where the agent or IDE must not appear in commit history.
+## Cleanup — Legacy commit-msg hook
+
+If the project contains any of the following legacy artefacts, remove them:
+
+- `scripts/git-hooks/commit-msg` — delete the file (and `scripts/git-hooks/` directory if empty)
+- `install-hooks` target in the Makefile — remove the target and its `.PHONY` entry
+- Any `make install-hooks` mention in README or other documentation
+
+These artefacts are obsolete and must be cleaned up when encountered.
 
 ## After Every Change — Makefile First
 

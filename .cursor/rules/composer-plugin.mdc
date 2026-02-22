@@ -81,8 +81,6 @@ Default: `editors: ["cursor"]`. User opts in via `extra.bundle-ai-kit.editors`.
 
 Never reference the agent or any co-author (no Co-authored-by, Signed-off-by from the AI). Commit messages describe only the change. Never use `git commit --trailer`.
 
-If the IDE adds Co-authored-by automatically, use a commit-msg hook in `scripts/git-hooks/commit-msg` that strips matching lines, with `make install-hooks` to install it.
-
 ## After Every Change — Makefile First
 
 Always use Makefile targets. Never call `vendor/bin/` directly.
