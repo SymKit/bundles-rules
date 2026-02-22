@@ -46,6 +46,16 @@ alwaysApply: true
 - `translations/` at bundle root for XLIFF files (auto-discovered by Symfony)
 - Never extend `AbstractController` — inject specific services
 
+## README
+
+The `README.md` must always include the following badges at the top (replace `{vendor}/{repo}` with the actual repository name):
+
+```markdown
+[![CI](https://github.com/{vendor}/{repo}/actions/workflows/ci.yml/badge.svg)](https://github.com/{vendor}/{repo}/actions)
+[![Latest Version](https://img.shields.io/packagist/v/{vendor}/{repo}.svg)](https://packagist.org/packages/{vendor}/{repo})
+[![PHPStan Level 9](https://img.shields.io/badge/PHPStan-level%209-brightgreen.svg)](https://phpstan.org/)
+```
+
 ## Services (contexte bundle)
 
 - Dans un bundle, **ne pas utiliser les attributs** pour déclarer les services (tags, listeners, composants Twig, etc.).
