@@ -91,6 +91,7 @@ Always use Makefile targets. Never call `vendor/bin/` directly.
 
 - `make cs-fix` — fix code style
 - `make phpstan` — static analysis
+- `make lint` — composer validate --strict
 - `make test` — run tests
 - `make quality` — full pipeline (cs-check + phpstan + deptrac + lint + test + infection)
 - `make ci` — security-check + quality
