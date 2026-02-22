@@ -181,7 +181,6 @@ phpunit.xml
 phpstan.neon
 config/reference.php
 *.log
-.cursor/
 .agent/
 .claude/
 ```
