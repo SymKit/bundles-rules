@@ -46,7 +46,8 @@ class VendorNameBundle extends AbstractBundle
 
 ## Language Features
 
-- PHP 8 attributes: `#[Route]`, `#[AsEventListener]`, `#[AutoconfigureTag]`. Never `@annotations`.
+- PHP 8 attributes for routing/validation: `#[Route]`, `#[Assert\...]`. Never `@annotations`.
+- **No attributes for service/tag registration** (`#[AsEventListener]`, `#[AutoconfigureTag]`, `#[AsTwigComponent]`, etc.) — in a bundle, all service registration goes through `loadExtension()` or XML config (see symfony-bundle rule).
 - Native function prefix: `\count()`, `\sprintf()`, `\in_array()`, `\array_map()`
 - `match` over `switch` when applicable
 - Early return to reduce nesting

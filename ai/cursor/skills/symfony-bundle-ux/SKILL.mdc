@@ -190,15 +190,14 @@ declare(strict_types=1);
 
 namespace Acme\BlogBundle\Twig\Components;
 
-use Symfony\UX\TwigComponent\Attribute\AsTwigComponent;
-
-#[AsTwigComponent('Acme:Search', template: '@AcmeBlog/components/Acme/Search.html.twig')]
 final class Search
 {
     public string $placeholder = 'Search...';
     public string $endpoint = '/search';
 }
 ```
+
+**No `#[AsTwigComponent]` attribute** — in a bundle, components are registered via `prependExtension()` (see below).
 
 ### Registration via prependExtension
 
@@ -228,13 +227,12 @@ declare(strict_types=1);
 
 namespace Acme\BlogBundle\Twig\Components;
 
-use Symfony\UX\LiveComponent\Attribute\AsLiveComponent;
 use Symfony\UX\LiveComponent\Attribute\LiveAction;
 use Symfony\UX\LiveComponent\Attribute\LiveListener;
 use Symfony\UX\LiveComponent\Attribute\LiveProp;
 use Symfony\UX\LiveComponent\DefaultActionTrait;
 
-#[AsLiveComponent]
+// No #[AsLiveComponent] attribute — registered via prependExtension() (twig_component.defaults)
 final class SearchLive
 {
     use DefaultActionTrait;

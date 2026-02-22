@@ -51,8 +51,9 @@ $data = $this->serializer->normalize($entity, 'json', ['groups' => 'entity:read'
 
 ## Twig Component vs Live Component
 
-- No reactivity needed → `#[AsTwigComponent]` + `final class`
-- Server-side reactivity → `#[AsLiveComponent]` + `DefaultActionTrait` + `final class`
+- No reactivity needed → Twig Component (`final class`, registered via `twig_component.defaults` in `prependExtension()`)
+- Server-side reactivity → Live Component (`final class` + `DefaultActionTrait`, registered via `twig_component.defaults` in `prependExtension()`)
+- **No `#[AsTwigComponent]` / `#[AsLiveComponent]` attributes in bundle code** — registration via config only (see symfony-bundle rule)
 
 ## Component Rules
 
