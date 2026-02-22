@@ -41,7 +41,8 @@ A bundle is code reusable and modifiable by the entire community. SOLID is not o
 - `declare(strict_types=1)` at the top of every PHP file
 - **`final readonly class`** for: services, handlers, processors, voters, listeners, DTOs
 - Exceptions to `final readonly`: Doctrine entities (not `readonly`), bundle class (not `final`), classes explicitly designed for inheritance (documented)
-- PHP 8 attributes: `#[Route]`, `#[AsEventListener]`, `#[AutoconfigureTag]`. Never `@annotations`.
+- PHP 8 attributes for routing/validation: `#[Route]`, `#[Assert\...]`. Never `@annotations`.
+- **No attributes for service/tag registration** (`#[AsEventListener]`, `#[AutoconfigureTag]`, `#[AsTwigComponent]`, etc.) — in a bundle, all service registration goes through `loadExtension()` or XML config.
 - Native function prefix: `\count()`, `\sprintf()`, `\in_array()`, `\array_map()`
 - `match` over `switch` when applicable
 - Early return to reduce nesting
