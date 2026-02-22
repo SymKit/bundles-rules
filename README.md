@@ -1,6 +1,6 @@
 # Symfony Bundle AI Kit
 
-[![CI](https://github.com/symkit/bundle-ai-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/symkit/bundle-ai-kit/actions)
+[![CI](https://github.com/SymKit/bundles-rules/actions/workflows/ci.yml/badge.svg)](https://github.com/SymKit/bundles-rules/actions)
 [![Latest Version](https://img.shields.io/packagist/v/symkit/bundle-ai-kit.svg)](https://packagist.org/packages/symkit/bundle-ai-kit)
 [![PHPStan Level 9](https://img.shields.io/badge/PHPStan-level%209-brightgreen.svg)](https://phpstan.org/)
 
