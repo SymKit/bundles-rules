@@ -1,0 +1,190 @@
+---
+description: "Error handling: custom exceptions, ExceptionListener, RFC 7807 Problem Details, errors."
+alwaysApply: false
+globs: src/**/*.php
+version: 1.7.0
+---
+
+# Error Handling
+
+## Core Principles
+
+1. **Domain exceptions are meaningful** — Custom exception classes per bounded context. Never raw `\RuntimeException` with magic strings.
+2. **Exception hierarchy** — Base `DomainException` per context, extended by specific exceptions (`OrderNotFoundException`, `InsufficientBalanceException`).
+3. **ExceptionListener for HTTP mapping** — Map domain exceptions to HTTP status codes in a single listener. Never catch-and-rethrow in controllers.
+4. **Problem Details RFC 7807** — All error responses follow RFC 7807 format: `type`, `title`, `status`, `detail`. See `api.mdc` and `api-platform.mdc`.
+5. **No exception swallowing** — Never empty `catch {}`. Log, rethrow, or handle. See `observability.mdc` for logging patterns.
+6. **Production error pages** — Custom Twig templates for 403/404/500 (see `twig.mdc`). No stack traces in production.
+7. **TranslatableMessage in exceptions** — Domain exceptions carry `TranslatableMessage` for user-facing errors. See `i18n.mdc`.
+8. **Test error paths** — Every API endpoint tests 400/401/403/404/409 responses. See `testing.mdc`.
+
+---
+
+## Conventions
+
+### Custom Exception Classes per Context
+
+**Do:**
+
+```php
+namespace App\Billing\Exception;
+
+final class InvoiceNotFoundException extends \DomainException
+{
+    public static function withId(string $id): self
+    {
+        return new self(sprintf('Invoice "%s" not found.', $id));
+    }
+}
+```
+
+```php
+namespace App\Billing\Exception;
+
+final class InsufficientBalanceException extends \DomainException
+{
+    public function __construct(
+        public readonly TranslatableMessage $translatableMessage,
+    ) {
+        parent::__construct($translatableMessage->getMessage());
+    }
+}
+```
+
+**Don't:**
+
+```php
+throw new \RuntimeException('Invoice not found');  // No type, uncatchable specifically
+throw new \InvalidArgumentException('Bad input');  // Generic, no domain context
+```
+
+### ExceptionListener — Centralized HTTP Mapping
+
+**Do:**
+
+```php
+final class DomainExceptionListener implements EventSubscriberInterface
+{
+    public static function getSubscribedEvents(): array
+    {
+        return [KernelEvents::EXCEPTION => 'onKernelException'];
+    }
+
+    public function onKernelException(ExceptionEvent $event): void
+    {
+        $exception = $event->getThrowable();
+        $response = match (true) {
+            $exception instanceof EntityNotFoundException => new JsonResponse(
+                $this->problemDetails($exception, 404),
+                404,
+            ),
+            $exception instanceof AccessDeniedException => new JsonResponse(
+                $this->problemDetails($exception, 403),
+                403,
+            ),
+            $exception instanceof ValidationException => new JsonResponse(
+                $this->problemDetails($exception, 422),
+                422,
+            ),
+            default => null,
+        };
+
+        if ($response !== null) {
+            $response->headers->set('Content-Type', 'application/problem+json');
+            $event->setResponse($response);
+        }
+    }
+
+    private function problemDetails(\Throwable $e, int $status): array
+    {
+        return [
+            'type' => 'https://httpstatuses.com/' . $status,
+            'title' => Response::$statusTexts[$status] ?? 'Error',
+            'status' => $status,
+            'detail' => $e->getMessage(),
+        ];
+    }
+}
+```
+
+**Don't:**
+
+```php
+#[Route('/orders/{id}')]
+public function show(string $id): Response
+{
+    try {
+        $order = $this->handler->handle(new GetOrder($id));
+    } catch (OrderNotFoundException $e) {
+        return new JsonResponse(['error' => $e->getMessage()], 404);
+        // Duplicated in every controller — not DRY
+    }
+}
+```
+
+### Production Error Pages
+
+**Do:**
+
+```
+templates/
+  bundles/
+    TwigBundle/
+      Exception/
+        error403.html.twig
+        error404.html.twig
+        error500.html.twig
+```
+
+```twig
+{# templates/bundles/TwigBundle/Exception/error404.html.twig #}
+{% extends 'base.html.twig' %}
+{% block title %}Page not found{% endblock %}
+{% block body %}
+  <h1>{{ 'error.404.title'|trans }}</h1>
+  <p>{{ 'error.404.message'|trans }}</p>
+{% endblock %}
+```
+
+**Don't:** Show Symfony's default exception page with stack traces in production.
+
+### Named Constructors for Exception Context
+
+**Do:**
+
+```php
+final class OrderNotFoundException extends \DomainException
+{
+    public static function withId(UuidInterface $id): self
+    {
+        return new self(sprintf('Order "%s" not found.', $id->toString()));
+    }
+
+    public static function forUser(UuidInterface $userId): self
+    {
+        return new self(sprintf('No orders found for user "%s".', $userId->toString()));
+    }
+}
+
+// Usage:
+throw OrderNotFoundException::withId($orderId);
+```
+
+**Don't:**
+
+```php
+throw new OrderNotFoundException('Order ' . $id . ' not found');  // Inconsistent messages
+```
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| Raw `\RuntimeException` everywhere | Custom exception per bounded context with named constructors |
+| Exception-to-HTTP mapping in controllers | Centralized `ExceptionListener` with `match` |
+| Empty `catch {}` blocks | Log, rethrow, or handle. Never swallow exceptions |
+| Stack traces in production | Custom Twig error templates for 403/404/500 |
+| Inconsistent error response format | Problem Details RFC 7807 (`application/problem+json`) |
+| No error path tests | Test 400/401/403/404/409 for every endpoint. See `testing.mdc` |

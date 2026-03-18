@@ -1,0 +1,310 @@
+---
+description: "Bundle architecture: Extension, services, public Contract API, tests, Flex — adapt to existing patterns."
+alwaysApply: false
+globs: src/**/*.php,config/**/*.xml,composer.json
+version: 2.0.0
+---
+
+# Architecture
+
+## Core Principles
+
+1. **Adapt, never prescribe** — Detect existing patterns in the codebase and follow them. No forced DDD or MVC.
+2. **Bounded contexts** — Group related code by domain area. Respect existing module boundaries.
+3. **Layer order (bundle)** — Extension/config (`configure()`, `loadExtension()`) → internal services → **public API** (`Contract/`, events, DTOs) → integration tests (minimal Kernel) → Flex recipe/docs. If the bundle ships Doctrine entities or API resources, then follow `doctrine.mdc` / `api-platform.mdc` for those optional layers.
+4. **Makefile: three targets only** — `make ci`, `make tests`, `make quality`. All tools run inside these. See `quality-pipeline.mdc`.
+5. **Constructor injection only** — See `coding-standards.mdc` for DI conventions. No service locator or setter injection.
+6. **Interface-driven infrastructure** — See `coding-standards.mdc` for interface-driven DI. Implementations in infrastructure layer.
+7. **Events are data, not behavior** — Domain events (Symfony EventDispatcher, synchronous) are final readonly DTOs. All logic lives in subscribers.
+8. **Configuration as typed objects** — Use Options Object DTOs for config. Never inject ParameterBag in domain.
+
+> For state machine workflows, see `workflow.mdc`. For async event reactions via Messenger, see `messenger.mdc`. For scheduled console tasks, see `console-commands.mdc`.
+
+---
+
+## Conventions
+
+### Detect Existing Patterns
+
+**Do:**
+
+Before adding code, audit the bundle: How is DI wired (XML vs PHP)? What is already in `Contract/`? How does the host app consume the bundle?
+
+```php
+// Match existing service definition style (XML in config/, or loadExtension).
+// New public surface → interface in Contract/, implementation internal + services.
+```
+
+**Don't:**
+
+```php
+// Don't impose DDD if project uses anemic entities
+// Don't introduce new patterns that differ from existing ones
+```
+
+### Layer Implementation Order (bundle)
+
+**Do:**
+
+1. **Config** — `configure()` tree, parameters consumers need
+2. **Services** — Register in `loadExtension()` or XML; inject interfaces from `Contract/`
+3. **Public API** — Interfaces, event classes, DTOs consumers rely on (semver)
+4. **Tests** — Unit for services; `KernelTestCase` with minimal `TestKernel` for container integration
+5. **Optional** — Entities/repos, API Platform resources, controllers only if the bundle exposes them
+
+**Don't:**
+
+```php
+// Don't leak internal classes in Contract/
+// Don't register bundle services via PHP attributes — use config (see symfony-bundle.mdc)
+```
+
+### Makefile as Entry Point
+
+Only three targets are in the contract: `make quality`, `make tests`, `make ci`. All tools (PHPStan, Deptrac, PHPUnit, Infection, etc.) run inside these. After any implementation, run `make ci`. See `quality-pipeline.mdc`.
+
+**Do:**
+
+```bash
+make quality   # Lint, Deptrac, PHPStan, CS check — all quality tools
+make tests     # PHPUnit, Infection — all test tools
+make ci        # Full pipeline (quality + tests); run after implementation
+```
+
+**Don't:**
+
+```bash
+composer test       # Use make tests
+php bin/phpunit     # Use make tests
+vendor/bin/phpstan  # Use make quality
+```
+
+### Constructor Injection & Interface-Driven DI
+
+See `coding-standards.mdc` for full Do/Don't patterns (constructor injection, `#[AsAlias]`, `#[TaggedIterator]`).
+
+**Key rules:** All dependencies via constructor. Type-hint interfaces (DIP). Domain interfaces use only domain types — no `EntityManagerInterface`, `ContainerInterface`, or `ParameterBagInterface`.
+
+### Domain Events — Final Readonly DTOs
+
+Events carry data only. No behavior, no injected services, no `GenericEvent`.
+
+**Do:**
+
+```php
+final readonly class OrderPlacedEvent
+{
+    public function __construct(
+        private UuidInterface $orderId,
+        private UuidInterface $userId,
+        private \DateTimeImmutable $placedAt,
+    ) {}
+
+    public function getOrderId(): UuidInterface { return $this->orderId; }
+    public function getUserId(): UuidInterface { return $this->userId; }
+    public function getPlacedAt(): \DateTimeImmutable { return $this->placedAt; }
+}
+```
+
+**Don't:**
+
+```php
+// GenericEvent — no type safety, no autocompletion
+$dispatcher->dispatch(new GenericEvent($order, ['action' => 'placed']));
+
+// Event with behavior
+final class OrderPlacedEvent
+{
+    public function sendNotification(): void { /* NO */ }
+}
+```
+
+### Domain Events — Dispatch from Handlers, Not Entities
+
+**Do:**
+
+```php
+final readonly class PlaceOrderHandler
+{
+    public function __construct(
+        private OrderRepositoryInterface $repository,
+        private EventDispatcherInterface $dispatcher,
+    ) {}
+
+    public function __invoke(PlaceOrder $command): void
+    {
+        $order = $this->repository->find($command->orderId);
+        $order->place();
+        $this->repository->save($order);
+        $this->dispatcher->dispatch(new OrderPlacedEvent(
+            $order->getId(), $command->userId, new \DateTimeImmutable(),
+        ));
+    }
+}
+```
+
+**Don't:** Dispatch events from inside entities (entities must not know about infrastructure).
+
+### Domain Events — SRP Subscribers
+
+One subscriber = one side-effect. Never a catch-all subscriber.
+
+**Do:**
+
+```php
+final readonly class SendConfirmationOnOrderPlacedSubscriber implements EventSubscriberInterface
+{
+    public function __construct(private NotificationServiceInterface $notifier) {}
+
+    public static function getSubscribedEvents(): array
+    {
+        return [OrderPlacedEvent::class => 'onOrderPlaced'];
+    }
+
+    public function onOrderPlaced(OrderPlacedEvent $event): void
+    {
+        $this->notifier->sendOrderConfirmation(
+            $event->getOrderId(), $event->getUserId(),
+        );
+    }
+}
+```
+
+**Don't:**
+
+```php
+// Catch-all subscriber with multiple responsibilities
+final class OrderSubscriber implements EventSubscriberInterface
+{
+    public function onOrderPlaced(OrderPlacedEvent $event): void
+    {
+        $this->sendEmail($event);
+        $this->updateStats($event);
+        $this->notifyWarehouse($event);
+    }
+}
+```
+
+### Domain Events — Heavy Reactions
+
+If the reaction involves network I/O (API, email), heavy CPU (PDF), or database writes, offload to async processing via Symfony Messenger — see `messenger.mdc`. Never execute heavy tasks synchronously in the subscriber.
+
+### Domain Events — Cross-Context via Contract
+
+**Do:** Events shared between bounded contexts live in a `Contract/` namespace (or shared kernel). Each context imports only the contract, not the other context's internals.
+
+### Configuration — Options Object Pattern
+
+When a service needs 3+ related config parameters, create an immutable DTO.
+
+**Do:**
+
+```php
+final readonly class S3StorageOptions
+{
+    public function __construct(
+        public string $bucket,
+        public string $region,
+        public string $accessKey,
+        public string $secretKey,
+        public int $timeout = 30,
+    ) {}
+}
+```
+
+```php
+final readonly class S3StorageService
+{
+    public function __construct(
+        private S3StorageOptions $options,
+        private S3Client $client,
+    ) {}
+}
+```
+
+**Don't:**
+
+```php
+final class S3StorageService
+{
+    public function __construct(
+        private ParameterBagInterface $params,
+    ) {}
+
+    public function upload(): void
+    {
+        $bucket = $this->params->get('s3_bucket');
+    }
+}
+```
+
+### Configuration — TreeBuilder for Modules
+
+**Do:**
+
+```php
+final class Configuration implements ConfigurationInterface
+{
+    public function getConfigTreeBuilder(): TreeBuilder
+    {
+        $treeBuilder = new TreeBuilder('my_module');
+        $root = $treeBuilder->getRootNode()->children();
+        $root->scalarNode('api_url')->isRequired()->cannotBeEmpty()->end();
+        $root->integerNode('timeout')->defaultValue(30)->min(1)->end();
+        $root->booleanNode('cache_enabled')->defaultTrue()->end();
+        return $treeBuilder;
+    }
+}
+```
+
+### Configuration — Env Var Processors
+
+**Do:**
+
+```yaml
+parameters:
+  app.api_timeout: '%env(int:API_TIMEOUT)%'
+  app.api_key: '%env(trim:API_KEY)%'
+  app.debug: '%env(bool:APP_DEBUG)%'
+```
+
+**Don't:**
+
+```yaml
+parameters:
+  app.api_timeout: '%env(API_TIMEOUT)%'  # String, not int — strict typing crash
+```
+
+### Configuration — Secrets Vault
+
+> See `security.mdc` SBD-07 for secrets vault conventions (`secrets:set`, no credentials in `.env`).
+
+### Configuration — Cache Warmup in CI
+
+**Do:**
+
+```yaml
+build:
+  script:
+    - composer install --no-dev
+    - export DATABASE_URL="mysql://user:pass@localhost/db"
+    - php bin/console cache:warmup --env=prod
+```
+
+**Don't:** Let cache generate on first request in production (Thundering Herd risk).
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| Prescribing architecture (DDD/CQRS) on simple projects | Audit codebase first. Match existing patterns. Evolve incrementally |
+| Wrong layer order (controller before entity) | Follow: Entity → Repository → Handler → API → Voter → Tests → Events |
+| ContainerInterface / service locator | Inject concrete deps via constructor. `lazy: true` for deferred init |
+| Infrastructure types in domain interfaces | Domain interfaces use only domain types |
+| Events with behavior or side effects | Events are `final readonly` DTOs. Logic in subscribers only |
+| `GenericEvent` instead of typed event | Always create dedicated `final readonly` event class |
+| ParameterBag in domain services | Options Object DTO for config. Inject scalars or DTOs |
+| 5+ raw config params in constructor | Group into immutable Options DTO. Validate at compile time |
+| Bypassing Makefile (raw composer/phpunit) | Use `make ci`, `make tests`, or `make quality` only |

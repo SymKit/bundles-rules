@@ -1,0 +1,97 @@
+---
+name: feature
+description: >-
+  Heavy skill: full pipeline (PM→Architect→Dev→QA) for new functionality.
+  ONLY invoke when the user explicitly types /feature or requests the feature workflow.
+  Never auto-apply.
+version: 2.0.0
+---
+
+# Feature Pipeline
+
+Full orchestration for implementing new functionality: PM scopes requirements, Architect designs, Main agent implements layer by layer and automatically triggers QA verification. User validates between PM→Architect and after QA.
+
+## When to Use
+
+- User explicitly types `/feature` or asks for the feature workflow
+- User describes a new feature or functionality to add
+- Do NOT use when: user reports a bug (use `/bug-fix`), mentions refactoring or code smell (use `/refactor`), or asks for a quick change without the full pipeline
+
+## Instructions
+
+### Phase 0: Initial Clarification
+
+Before launching the PM subagent, use the ask question tool to confirm:
+- "Do you have an issue tracker ticket ID or story link (e.g., Jira, Redmine) for this feature?"
+- "What is the primary user benefit of this feature?"
+- "Are there existing features or APIs this work extends or replaces?"
+- "What constraints (performance, security, backward compatibility) should we consider?"
+
+### Phase 1: PM Subagent (Requirements)
+
+Launch the PM subagent with the task:
+
+1. Scope requirements — understand the full ask, identify stakeholders and user roles
+2. Use the ask question tool aggressively to surface edge cases, acceptance criteria, and error scenarios
+3. Define acceptance criteria in Given/When/Then format
+4. Document edge cases and expected behavior for each
+5. Produce specification and save to `docs/stories/FEAT-NNN-slug.md`
+
+**Output:** Structured spec with user stories, acceptance criteria, edge cases, out-of-scope items.
+
+**User validation gate:** STOP. Present the spec to the user. Ask: "Does this specification accurately capture your requirements? Should we add, remove, or clarify anything before the Architect designs the solution?" Do NOT proceed to Phase 2 until the user confirms.
+
+### Phase 2: Architect Subagent (Technical Design)
+
+Launch the Architect subagent in **readonly** mode with the task:
+
+1. Read the PM specification from `docs/stories/`
+2. Explore the existing codebase — detect patterns, layer structure, naming conventions
+3. Design from scratch: for a **bundle**, implementation order = config Extension → services (XML/loadExtension) → public Contract/events → tests (minimal Kernel) → optional Doctrine/API/UX per `architecture.mdc` and `symfony-bundle.mdc`
+4. Select applicable rules — list which rules from `.cursor/rules/` the main agent MUST read before implementing
+5. Save the design to `docs/handoffs/FEAT-NNN-architecture.md`
+
+**Output:** Technical design with components, implementation order, applicable rules list, risks.
+
+**User validation gate:** STOP. Present the design to the user. Ask: "Does this technical approach work for you? Any concerns about the proposed architecture?" Do NOT proceed to Phase 3 until the user approves.
+
+### Phase 3: Main Agent (Implementation & Verification)
+
+You (the main agent) implement. Do NOT delegate implementation to a subagent.
+
+1. Read every rule listed in the Architect's "Applicable Rules" section — load each `.mdc` file before coding
+2. Implement layer by layer following the Architect's implementation order exactly
+3. After each layer, run `make ci` — fix any issues before proceeding
+4. Follow the Architect's bundle layer sequence (typically: config/services → Contract/public API → implementation → tests; add Entity/Repository/API only if in scope)
+5. Use only `make` commands — never raw composer, php, phpunit, phpstan, or cs-fixer
+
+**Layer verification:** After each layer, run `make ci`. If it fails, fix before continuing.
+
+**Final Verification (QA):** Once all layers are implemented, automatically launch the QA subagent (fast model) with the task:
+1. Run `make ci` — report pass/fail
+2. Full acceptance: compare implementation against PM spec — all criteria met? edge cases covered?
+3. Rule compliance: verify code follows each applicable rule from the Architect's list
+4. Produce structured verdict: APPROVED / NEEDS CHANGES / REJECTED
+
+**Output:** QA review with verdict, quality checks, specification compliance, rule compliance, issues found.
+
+**User validation gate:** Present QA results to the user. If NEEDS CHANGES or REJECTED, address issues and re-run QA. Only conclude when QA approves and the user validates.
+
+## Exit Checklist (MANDATORY before concluding)
+
+- [ ] PM specification saved to `docs/stories/`
+- [ ] Architect design saved to `docs/handoffs/`
+- [ ] User validated spec before Architect phase
+- [ ] User validated design before implementation
+- [ ] All layers implemented in order with `make ci` passing after each
+- [ ] QA subagent launched automatically and approved the implementation
+- [ ] User validated final result
+- [ ] `make ci` passes
+
+## On Failure
+
+- If PM spec is rejected: return to Phase 1, ask clarifying questions, revise spec, re-present for validation
+- If Architect design is rejected: return to Phase 2, adjust design, re-present for validation
+- If `make ci` fails during implementation: fix the reported issues, re-run `make ci`, do not proceed to next layer until green
+- If QA rejects: address each reported issue, re-implement as needed, re-launch QA subagent
+- If stuck after 3 attempts in any phase: ask the user for guidance

@@ -1,0 +1,340 @@
+---
+description: "Testing: unit/integration/functional, TDD, DAMA, Given/When/Then, Infection MSI>=70% (bundle repos)."
+alwaysApply: false
+globs: tests/**/*.php
+version: 1.7.0
+---
+
+# Testing
+
+**Bundle context** — Prefer a minimal `TestKernel` that registers only this bundle (+ required deps). Integration tests boot the container and assert services/tags/config. Functional HTTP tests apply only if the bundle exposes routes/controllers.
+
+For EntityManagerInterface and DAMA DoctrineTestBundle, see `doctrine.mdc`. For bus testing, see `messenger.mdc`.
+
+## Core Principles
+
+1. **Three test types** — Unit (no DB, mocked deps), integration (real DB, repositories), functional (HTTP, ApiTestCase).
+2. **Unit tests** — For handlers, services, value objects, validators. Mock all dependencies. No database.
+3. **Integration tests** — For repositories. Use real database (not SQLite). Verify queries and mappings.
+4. **Functional tests** — Use ApiTestCase (see `api-platform.mdc`). Structure with Given/When/Then. Test success AND error paths.
+5. **TDD mandatory for bug fixes** — Write regression test first, then fix. Never fix then test.
+6. **FIRST principles** — Fast, Independent, Repeatable, Self-validating, Timely.
+7. **Infection mutation testing** — MSI >= 70% overall, covered MSI >= 80%.
+8. **DAMA transaction isolation** — Each test wrapped in a rollback transaction. No DB pollution.
+9. **Given phase via Message Bus** — Use Commands to set up test state (ISO-functional). Not EntityManager. See `messenger.mdc` for bus configuration.
+10. **Tests alongside code** — Write tests when writing code. Never add tests only at the end.
+
+---
+
+## Conventions
+
+### Unit Tests for Handlers
+
+**Do:**
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Unit\Handler;
+
+use App\Handler\CreateOrderHandler;
+use App\Repository\OrderRepositoryInterface;
+use PHPUnit\Framework\TestCase;
+
+final class CreateOrderHandlerTest extends TestCase
+{
+    public function test_it_creates_order_and_dispatches_event(): void
+    {
+        // Given
+        $repository = $this->createMock(OrderRepositoryInterface::class);
+        $repository->expects($this->once())->method('save');
+        $bus = $this->createMock(EventDispatcherInterface::class);
+        $bus->expects($this->once())->method('dispatch');
+
+        // When
+        $handler = new CreateOrderHandler($repository, $bus);
+        $handler->__invoke(new CreateOrder(userId: 'usr_01', items: []));
+
+        // Then — assertions via mock expectations
+    }
+}
+```
+
+**Don't:**
+
+```php
+final class CreateOrderHandlerTest extends KernelTestCase
+{
+    public function test_it_creates_order(): void
+    {
+        $handler = self::getContainer()->get(CreateOrderHandler::class);
+        $handler->__invoke(new CreateOrder(...));
+        $this->assertNotEmpty($this->em->getRepository(Order::class)->findAll());
+    }
+}
+```
+
+### Integration Tests for Repositories
+
+**Do:**
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Integration\Repository;
+
+use App\Entity\Order;
+use App\Repository\OrderRepository;
+use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+
+final class OrderRepositoryTest extends KernelTestCase
+{
+    private OrderRepository $repository;
+    private EntityManagerInterface $em;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $kernel = self::bootKernel();
+        $this->em = $kernel->getContainer()->get(EntityManagerInterface::class);
+        $this->repository = $kernel->getContainer()->get(OrderRepository::class);
+    }
+
+    public function test_it_finds_pending_orders(): void
+    {
+        // Given
+        $order = new Order(OrderId::generate(), OrderStatus::PENDING);
+        $this->em->persist($order);
+        $this->em->flush();
+
+        // When
+        $found = iterator_to_array($this->repository->findPendingOrders());
+
+        // Then
+        $this->assertCount(1, $found);
+    }
+}
+```
+
+**Don't:** Use SQLite for integration tests when production uses MySQL/PostgreSQL.
+
+### Functional Tests with ApiTestCase — Success and Error Paths
+
+**Do:**
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Functional;
+
+use ApiPlatform\Symfony\Bundle\Test\ApiTestCase;
+
+final class OrderApiTest extends ApiTestCase
+{
+    public function test_create_order_returns_201(): void
+    {
+        // Given
+        $client = static::createClient();
+        $this->commandBus->dispatch(new RegisterUser($this->userId));
+
+        // When
+        $response = $client->request('POST', '/api/orders', [
+            'json' => ['items' => [['sku' => 'SKU1', 'qty' => 2]]],
+        ]);
+
+        // Then
+        $this->assertResponseStatusCodeSame(201);
+        $this->assertJsonContains(['status' => 'created']);
+    }
+
+    public function test_create_order_returns_401_when_unauthenticated(): void
+    {
+        $client = static::createClient();
+        $client->request('POST', '/api/orders', ['json' => ['items' => []]]);
+        $this->assertResponseStatusCodeSame(401);
+    }
+
+    public function test_create_order_returns_403_when_unauthorized(): void
+    {
+        // Given: user without order:create permission
+        $client = static::createClient();
+        $this->authenticateAs($client, $this->readOnlyUserId);
+
+        // When
+        $client->request('POST', '/api/orders', ['json' => ['items' => []]]);
+
+        // Then
+        $this->assertResponseStatusCodeSame(403);
+    }
+
+    public function test_get_order_returns_404_when_not_found(): void
+    {
+        $client = static::createClient();
+        $this->authenticateAs($client, $this->userId);
+        $client->request('GET', '/api/orders/00000000-0000-0000-0000-000000000000');
+        $this->assertResponseStatusCodeSame(404);
+    }
+}
+```
+
+**Don't:**
+
+```php
+// Only testing happy path — missing 401, 403, 404, 409
+public function test_create_order(): void
+{
+    $client = static::createClient();
+    $client->request('POST', '/api/orders', ['json' => [...]]);
+    $this->assertResponseStatusCodeSame(201);
+}
+```
+
+### Given Phase — Message Bus (ISO-Functional)
+
+**Do:**
+
+Prepare test state by dispatching Commands through the bus. Same code path as production ensures realistic state.
+
+```php
+public function test_get_product_returns_200(): void
+{
+    // Given — state via Command Bus
+    $this->commandBus->dispatch(new CreateProductCommand($this->productId, 'My Product'));
+
+    // When
+    $this->client->request('GET', '/api/products/' . $this->productId->toRfc4122());
+
+    // Then
+    self::assertResponseIsSuccessful();
+    self::assertJsonContains(['name' => 'My Product']);
+}
+```
+
+**Don't:**
+
+```php
+// Don't use EntityManager directly for Given phase in functional tests
+$product = new Product($id, 'My Product');
+$this->em->persist($product);
+$this->em->flush();
+```
+
+### DAMA DoctrineTestBundle — Transaction Isolation
+
+Enable DAMA in `phpunit.xml.dist` to wrap each test in a transaction with automatic rollback. Faster than reloading fixtures.
+
+**Do:**
+
+```xml
+<!-- phpunit.xml.dist -->
+<extensions>
+    <bootstrap class="DAMA\DoctrineTestBundle\PHPUnit\PHPUnitExtension" />
+</extensions>
+```
+
+**Don't:**
+
+- Manually truncate tables between tests.
+- Use `setUp()` to reload fixture SQL files.
+
+### TDD for Bug Fixes
+
+**Do:**
+
+1. Reproduce the bug in a failing test.
+2. Fix the code.
+3. Verify the test passes and no regressions.
+
+```php
+public function test_deleted_order_cannot_be_placed(): void
+{
+    $order = $this->createOrder(status: OrderStatus::DELETED);
+    $this->expectException(DomainException::class);
+    $this->expectExceptionMessage('Deleted order cannot be placed');
+    $order->place();
+}
+```
+
+**Don't:** Fix first, then add a test that passes — the test might not actually assert the fix.
+
+### FIRST Principles
+
+- **Fast** — Unit tests run in milliseconds. Functional tests use DAMA transactions.
+- **Independent** — Each test sets up its own data. No shared mutable state.
+- **Repeatable** — Same result every run. Use `ClockInterface` for time-dependent logic.
+- **Self-validating** — Explicit assertions on values, not just "no exception".
+- **Timely** — Write tests with the code. Not after.
+
+### Infection Mutation Testing
+
+> See `quality-pipeline.mdc` for Infection configuration, MSI thresholds (>= 70%), and CI integration. Fix or add tests when mutations survive.
+
+### Memory Assertion for Batch/Export Tests
+
+**Do:**
+
+```php
+final class ExportInvoicesCommandTest extends TestCase
+{
+    private const MEMORY_LIMIT_MB = 64;
+
+    public function test_export_10k_lines_stays_within_memory(): void
+    {
+        $peakBefore = memory_get_peak_usage(true);
+        $command = $this->createCommandWithFixtures(10_000);
+        $command->run($input, $output);
+        $peakAfter = memory_get_peak_usage(true);
+        $usedMb = ($peakAfter - $peakBefore) / 1024 / 1024;
+        self::assertLessThan(self::MEMORY_LIMIT_MB, $usedMb);
+    }
+}
+```
+
+### Mock Repositories — ArrayIterator, Not Array
+
+**Do:**
+
+```php
+$repo = $this->createMock(InvoiceLineRepositoryInterface::class);
+$repo->method('streamAllForExport')
+    ->willReturn(new \ArrayIterator($fixtures));
+```
+
+**Don't:**
+
+```php
+$repo->method('streamAllForExport')
+    ->willReturn($fixtures);  // Raw array hides non-rewindable contract bugs
+```
+
+---
+
+## Test Audit Checklist
+
+- `tests/Unit/`, `tests/Functional/` dirs exist; `phpunit.xml.dist` declares matching suites
+- DAMA extension enabled; `infection.json5` with MSI >= 70%, covered MSI >= 80%
+- Handlers/services/VOs/validators → unit tests; API endpoints → functional tests (ApiTestCase)
+- Given/When/Then phases identifiable; error paths (401/403/404/409) covered
+- Method names reflect scenario (`test_create_order_returns_201`)
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| DB in unit tests (KernelTestCase) | Unit tests use mocks only. KernelTestCase for integration/functional |
+| SQLite for integration tests | Use same DB engine as production |
+| `$em->persist()` in Given phase | Dispatch Commands via bus (ISO-functional) |
+| Missing error path tests (401/403/404) | Test success AND error codes for every HTTP operation |
+| Bug fix without regression test | TDD: failing test first, then fix |
+| Low mutation score | Infection MSI >= 70%, covered MSI >= 80% |
+| Missing DAMA transaction isolation | Enable DAMA in `phpunit.xml.dist` for auto-rollback |
+| Tests added after feature complete | Write tests with the code, not after |
+| Memory leaks in batch tests | Add `memory_get_peak_usage` assertions |

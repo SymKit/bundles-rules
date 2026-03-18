@@ -6,7 +6,7 @@ alwaysApply: false
 
 # MDC Content Conventions
 
-These rules govern the `.mdc` files in `ai/cursor/` that the plugin distributes to consumer projects.
+These rules govern `.mdc` files under `ai/cursor/rules/` and `ai/cursor/skills/*/SKILL.mdc`. Agent prompts in `ai/cursor/agents/` are plain `.md`. `ai/AGENTS.md` is plain Markdown at project root after sync.
 
 ## Frontmatter — Rules
 
@@ -50,17 +50,17 @@ The body must render correctly as plain Markdown (for Claude Code and Windsurf):
 
 - No Cursor-specific syntax in the body (frontmatter is stripped for other editors)
 - No references to `.mdc` format or Cursor features
-- Skill cross-references: use plain text like "see the `symfony-bundle-quality` skill" (not links to .mdc files, which won't exist in Claude/Windsurf)
+- Skill cross-references: plain text, e.g. "see the `quality-install` skill"
 
 ## File Naming
 
-- Rules: `kebab-case.mdc` (e.g. `php-bundle-code.mdc`, `bundle-quality.mdc`)
+- Rules: `kebab-case.mdc` (e.g. `architecture.mdc`, `symfony-bundle.mdc`)
 - Skills: `SKILL.mdc` as main file, additional files in kebab-case (e.g. `advanced-patterns.mdc`)
-- Non-MDC files in skills (e.g. `scaffold_bundle.php`) are copied as-is without conversion
+- Non-`.mdc` files in skills (e.g. templates under `quality-install/templates/`) are copied as-is without conversion
 
 ## Content Guidelines
 
 - One rule per concern (code style, tests, quality, etc.)
-- Skills cover larger topics (creating a bundle, setting up Doctrine, etc.)
+- Skills cover workflows (feature pipeline, quality-install, onboard, etc.)
 - Include an "After Every Change" section with the relevant `make` targets
 - Include a "Forbidden" or "Anti-Patterns" section for common mistakes

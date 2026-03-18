@@ -9,13 +9,15 @@ use Symkit\BundleAiKit\Composer\Context\SyncContext;
 use Symkit\BundleAiKit\Composer\Contract\EditorConfigProviderInterface;
 
 /**
- * Syncs AI rules and optional skills from package source to project dirs per editor.
+ * Syncs AI rules, optional skills, AGENTS.md, and agent prompts from package source to the project.
  * Depends on EditorConfigProviderInterface for editor-specific paths and conversion (DIP).
  */
 final class AiRulesInstaller
 {
     private const SOURCE_RULES = '/ai/cursor/rules';
     private const SOURCE_SKILLS = '/ai/cursor/skills';
+    private const SOURCE_AGENTS = '/ai/cursor/agents';
+    private const SOURCE_AGENTS_MD = '/ai/AGENTS.md';
 
     public function __construct(
         private readonly EditorConfigProviderInterface $editorConfigProvider,
@@ -26,6 +28,10 @@ final class AiRulesInstaller
     {
         $rulesSource = $context->packagePath.self::SOURCE_RULES;
         $skillsSource = $context->packagePath.self::SOURCE_SKILLS;
+        $agentsSource = $context->packagePath.self::SOURCE_AGENTS;
+        $agentsMdSource = $context->packagePath.self::SOURCE_AGENTS_MD;
+
+        $this->syncAgentsMd($agentsMdSource, $context->projectRoot.'/AGENTS.md');
 
         foreach ($context->editors as $editor) {
             $config = $this->editorConfigProvider->get($editor);
@@ -48,6 +54,22 @@ final class AiRulesInstaller
                     $this->mergeDirectory($skillSource, $projectSkillDir, $config);
                 }
             }
+
+            if (null !== $config->agentsDir && is_dir($agentsSource)) {
+                $projectAgentsDir = $context->projectRoot.'/'.$config->agentsDir;
+                $this->mergeDirectory($agentsSource, $projectAgentsDir, $config);
+            }
+        }
+    }
+
+    private function syncAgentsMd(string $source, string $dest): void
+    {
+        if (!is_file($source)) {
+            return;
+        }
+
+        if (!copy($source, $dest)) {
+            return;
         }
     }
 

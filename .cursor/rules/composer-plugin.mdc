@@ -8,8 +8,8 @@ alwaysApply: true
 ## Project Identity
 
 - Composer plugin (`"type": "composer-plugin"`) named `symkit/bundle-ai-kit`
-- Installs AI rules and skills into consumer projects for Cursor, Claude Code, Windsurf, and Google Antigravity
-- Single source of truth: `ai/cursor/rules/` and `ai/cursor/skills/`
+- Installs AI rules, skills, `AGENTS.md`, and `ai/cursor/agents/*.md` into consumer projects
+- Single source of truth: `ai/cursor/rules/`, `ai/cursor/skills/`, `ai/AGENTS.md`, `ai/cursor/agents/`
 - Runtime conversion from `.mdc` (Cursor) to `.md` (Claude, Windsurf, Antigravity) via `FrontmatterConverter`
 - Config read from consumer's `extra.bundle-ai-kit` in `composer.json`
 
@@ -56,18 +56,20 @@ src/Composer/
 
 ## Multi-Editor Support
 
-| Editor   | Rules destination         | Skills destination             | Format |
-|----------|--------------------------|--------------------------------|--------|
-| Cursor   | `.cursor/rules/`         | `.cursor/skills/{name}/`       | `.mdc` |
-| Claude   | `.claude/rules/`         | `.claude/rules/skills/{name}/` | `.md`  |
-| Windsurf     | `.windsurf/rules/`       | `.windsurf/rules/skills/{name}/` | `.md`  |
-| Antigravity  | `.agent/rules/`          | `.agent/rules/skills/{name}/`    | `.md`  |
+| Editor   | Rules | Skills | Agents | Rules format |
+|----------|-------|--------|--------|--------------|
+| Cursor   | `.cursor/rules/` | `.cursor/skills/{name}/` | `.cursor/agents/` | `.mdc` |
+| Claude   | `.claude/rules/` | `.claude/rules/skills/{name}/` | `.claude/agents/` | `.md` |
+| Windsurf | `.windsurf/rules/` | `.windsurf/rules/skills/{name}/` | `.windsurf/agents/` | `.md` |
+| Antigravity | `.agent/rules/` | `.agent/rules/skills/{name}/` | `.agent/agents/` | `.md` |
+
+Also: `ai/AGENTS.md` → project root `AGENTS.md` (once per sync).
 
 Default: `editors: ["cursor"]`. User opts in via `extra.bundle-ai-kit.editors`.
 
 ## Value Objects
 
-- `EditorConfig`: readonly, holds rulesDir, skillsDir, fileExtension, ?ContentConverterInterface
+- `EditorConfig`: readonly, holds rulesDir, skillsDir, fileExtension, ?ContentConverterInterface, ?agentsDir
 - `SyncContext`: readonly, holds packagePath, projectRoot, editors[], skills[]
 - Never mutate after construction. No setters.
 

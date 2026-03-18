@@ -1,0 +1,183 @@
+---
+description: "Mailer/Notifier: templated emails, transports, async Messenger dispatch, testing."
+alwaysApply: false
+globs: src/**/*.php,templates/**/*.twig
+version: 1.7.0
+---
+
+# Mailer & Notifier
+
+For async email dispatch, see `messenger.mdc`. For Twig email templates, see `twig.mdc`. For testing dispatched emails, see `testing.mdc`.
+
+## Core Principles
+
+1. **Twig-based `TemplatedEmail` always** — Never build HTML strings manually. Use `TemplatedEmail` with a Twig template for every transactional email.
+2. **Async by default** — Route all emails through Messenger (`routing: 'Symfony\Component\Mailer\Messenger\SendEmailMessage': async`). Only send synchronously when delivery confirmation is required in the same request.
+3. **Envelope from config** — Set `envelope.sender` and default `from` in `framework.mailer` config, not per-email. Override only when business requires a different sender.
+4. **One transport per environment** — Use `null://` in test, `native://default` in dev, SMTP/SES/API in prod. Configure via `MAILER_DSN` env var with typed processors.
+5. **Semantic email classes** — Wrap `TemplatedEmail` in domain-specific factory methods or dedicated email builder classes. Controllers never construct emails directly.
+6. **Notifier for multi-channel** — Use `Notification` + `ChatNotifierInterface` / `SmsNotifierInterface` when delivery spans email + SMS + Slack. Mailer alone for email-only flows.
+7. **PII in email context** — Never log full email bodies. Log recipient hash + message class + timestamp. See `observability.mdc` for PII masking patterns.
+8. **Idempotent email dispatch** — Guard against duplicate sends in async retries: check a `notification_sent_at` flag before dispatching. See `messenger.mdc` for idempotence patterns.
+
+---
+
+## Conventions
+
+### TemplatedEmail with Twig
+
+**Do:**
+
+```php
+$email = (new TemplatedEmail())
+    ->to($user->getEmail())
+    ->subject('Order Confirmed')
+    ->htmlTemplate('emails/order_confirmed.html.twig')
+    ->context([
+        'order' => $order,
+        'user' => $user,
+    ]);
+
+$this->mailer->send($email);
+```
+
+**Don't:**
+
+```php
+$email = (new Email())
+    ->html('<h1>Order ' . $order->getId() . ' confirmed</h1>'); // No escaping, no template
+```
+
+### Async Routing via Messenger
+
+**Do:**
+
+```yaml
+framework:
+    messenger:
+        routing:
+            'Symfony\Component\Mailer\Messenger\SendEmailMessage': async
+```
+
+**Don't:**
+
+```yaml
+# No routing — emails sent synchronously, blocking the HTTP response
+```
+
+### Domain Email Builders
+
+**Do:**
+
+```php
+final readonly class OrderEmailFactory
+{
+    public function __construct(private string $supportEmail) {}
+
+    public function createConfirmation(Order $order, User $user): TemplatedEmail
+    {
+        return (new TemplatedEmail())
+            ->to($user->getEmail())
+            ->replyTo($this->supportEmail)
+            ->subject('Order #' . $order->getReference() . ' confirmed')
+            ->htmlTemplate('emails/order_confirmed.html.twig')
+            ->context(['order' => $order, 'user' => $user]);
+    }
+}
+```
+
+**Don't:**
+
+```php
+// Building emails inline in controllers — duplication, no reuse, hard to test
+$email = (new TemplatedEmail())->to($user->getEmail())->subject('Order confirmed');
+$this->mailer->send($email);
+```
+
+### Notifier Multi-Channel
+
+**Do:**
+
+```php
+$notification = new Notification('New order received', ['email', 'chat/slack']);
+$notification->content('Order #' . $order->getReference() . ' needs review.');
+$this->notifier->send($notification, new Recipient($admin->getEmail()));
+```
+
+**Don't:**
+
+```php
+// Separate Mailer + Slack client calls — no unified delivery, no channel fallback
+$this->mailer->send($email);
+$this->slackClient->post($message);
+```
+
+### Transport Configuration
+
+**Do:**
+
+```yaml
+framework:
+    mailer:
+        dsn: '%env(MAILER_DSN)%'
+        envelope:
+            sender: 'noreply@example.com'
+
+when@test:
+    framework:
+        mailer:
+            dsn: 'null://null'
+```
+
+**Don't:**
+
+```yaml
+framework:
+    mailer:
+        dsn: 'smtp://user:pass@smtp.example.com:587' # Credentials in config — use env var
+```
+
+### Testing with MailerAssertionsTrait
+
+**Do:**
+
+```php
+use Symfony\Bundle\FrameworkBundle\Test\MailerAssertionsTrait;
+
+final class OrderWorkflowTest extends WebTestCase
+{
+    use MailerAssertionsTrait;
+
+    public function testOrderConfirmationEmailSent(): void
+    {
+        $this->client->request('POST', '/orders', ['json' => $payload]);
+        self::assertEmailCount(1);
+        $email = self::getMailerMessage();
+        self::assertEmailHeaderSame($email, 'To', 'customer@example.com');
+        self::assertEmailHtmlBodyContains($email, 'Order confirmed');
+    }
+}
+```
+
+**Don't:**
+
+```php
+// Mocking MailerInterface in functional tests — misses real serialization/rendering issues
+$mailer = $this->createMock(MailerInterface::class);
+$mailer->expects(self::once())->method('send');
+```
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| HTML string concatenation in emails | Use `TemplatedEmail` + Twig template. Never raw HTML |
+| Synchronous email in HTTP request | Route `SendEmailMessage` to async transport via Messenger |
+| Credentials in mailer DSN config | Use `%env(MAILER_DSN)%`. Store secrets via `secrets:set` |
+| No `null://` in test env | Configure `when@test` with `null://null` DSN |
+| Duplicate emails on async retry | Check `notification_sent_at` flag before dispatch. See `messenger.mdc` |
+| Logging full email body | Log recipient hash + message class only. See `observability.mdc` |
+| Building emails in controllers | Create domain email factory/builder classes for reuse and testability |
+| No envelope sender configured | Set `framework.mailer.envelope.sender` globally |

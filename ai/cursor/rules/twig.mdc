@@ -1,0 +1,387 @@
+---
+description: "Twig v3: arrow functions, CVA, enum(), cache/types tags, Intl filters, null-safe, embed."
+alwaysApply: false
+globs: templates/**/*.twig
+version: 1.7.0
+---
+
+# Twig (v3)
+
+For Stimulus/Turbo/Live Components/AssetMapper, see `frontend.mdc`. For translation filters (`|trans`, `t()`), see `i18n.mdc`. For `{% cache %}` pool configuration and tag invalidation, see `caching.mdc`.
+
+## Core Principles
+
+1. **Arrow functions over loops** — Use `|map`, `|filter`, `|find`, `|reduce`, `|sort` with arrow functions instead of verbose `{% for %}` + `{% if %}` + `{% set %}` combos.
+2. **Intl filters over manual formatting** — Use `|format_currency`, `|format_datetime`, `|format_number` for locale-aware output. Never format with `|date` + string concatenation.
+3. **`html_cva()` for variant styling** — Define component class variants with `html_cva()`. Never build CSS classes with string concatenation or nested `{% if %}`.
+4. **`{% cache %}` for fragment caching** — Cache expensive template fragments with key, TTL, and tags. Requires `twig/cache-extra`.
+5. **`{% types %}` for template contracts** — Declare expected variables and their types. Enables TwigStan static analysis and self-documents templates.
+6. **`enum()` for PHP enums** — Access enum cases directly in templates. Never pass enum values as magic strings from controllers.
+7. **Null-safe `?.` over ternary guards** — Use `user?.address?.city` instead of multi-line `{% if defined %}` chains.
+8. **`{% embed %}` for micro-layouts** — Combine include + extends for reusable structural skeletons with overridable blocks.
+9. **`|u` for Unicode string ops** — Use `|u.truncate()`, `|u.wordwrap()` for string manipulation. Never truncate with `|slice` (breaks multi-byte).
+10. **Named arguments with `:`** — Prefer `range(low: 1, high: 10)` over positional args. Available for filters, functions, tests, macros.
+11. **`twig/extra-bundle` required** — Most v3 features (`|u`, `|slug`, `|format_*`, `html_cva`, `{% cache %}`) need `twig/extra-bundle` + specific extras.
+
+---
+
+## Conventions
+
+### Arrow Functions — Functional Collection Processing
+
+**Do:**
+
+```twig
+{# Pipeline: filter → map → join #}
+{{ users|filter(u => u.active)|map(u => u.name)|join(', ') }}
+
+{# Find first matching element (v3.11) #}
+{% set admin = users|find(u => u.role == 'admin') %}
+
+{# Sort by property with spaceship operator #}
+{% for p in products|sort((a, b) => a.price <=> b.price) %}
+    {{ p.name }}: {{ p.price|format_currency('EUR') }}
+{% endfor %}
+
+{# Reduce to total #}
+{{ cart.items|reduce((total, item) => total + item.price * item.qty, 0)|format_currency('EUR') }}
+
+{# Extract single column from collection #}
+{{ users|column('email')|join(', ') }}
+
+{# has some / has every (iterable operators) #}
+{% if items has every v => v.stock > 0 %}All in stock{% endif %}
+{% if items has some v => v.featured %}Has featured{% endif %}
+```
+
+**Don't:**
+
+```twig
+{% set names = [] %}
+{% for u in users %}
+    {% if u.active %}
+        {% set names = names|merge([u.name]) %}
+    {% endif %}
+{% endfor %}
+{{ names|join(', ') }}
+```
+
+### Intl Filters — Locale-Aware Formatting
+
+**Do:**
+
+```twig
+{{ product.price|format_currency('EUR', locale: app.request.locale) }}
+
+{{ order.createdAt|format_datetime('long', 'short', locale: 'fr') }}
+
+{{ 0.15|format_number(style: 'percent') }}
+
+{{ 42|format_number(style: 'ordinal', locale: 'en') }}
+
+{{ 'FR'|country_name }}
+{{ 'EUR'|currency_name('fr') }}
+{{ 'en'|language_name('fr') }}
+```
+
+**Don't:**
+
+```twig
+{{ product.price|number_format(2, ',', ' ') }} €
+{{ order.createdAt|date('d/m/Y H:i') }}
+```
+
+### html_cva() — Class Variant Authority
+
+**Do:**
+
+```twig
+{% set btn = html_cva(
+    base: 'btn',
+    variants: {
+        color: { primary: 'btn-primary', danger: 'btn-danger' },
+        size: { sm: 'btn-sm', lg: 'btn-lg' },
+    },
+    default_variant: { color: 'primary', size: 'sm' },
+    compound_variants: [{
+        color: ['danger'],
+        size: ['lg'],
+        class: 'font-bold uppercase',
+    }]
+) %}
+
+<button class="{{ btn.apply({color, size}) }}">{{ label }}</button>
+```
+
+**Don't:**
+
+```twig
+<button class="btn {% if color == 'primary' %}btn-primary{% elseif color == 'danger' %}btn-danger{% endif %} {% if size == 'lg' %}btn-lg{% endif %}">
+    {{ label }}
+</button>
+```
+
+### html_classes() — Conditional CSS Classes
+
+**Do:**
+
+```twig
+<div class="{{ html_classes('card', {
+    'card--featured': product.featured,
+    'card--sold-out': product.stock == 0,
+}) }}">
+```
+
+**Don't:**
+
+```twig
+<div class="card {{ product.featured ? 'card--featured' : '' }} {{ product.stock == 0 ? 'card--sold-out' : '' }}">
+```
+
+### enum() and enum_cases() — PHP Enum Access
+
+**Do:**
+
+```twig
+{% if order.status == enum('App\\Enum\\OrderStatus').Paid %}
+    <span class="badge-success">{{ order.status.value }}</span>
+{% endif %}
+
+{% for status in enum('App\\Enum\\OrderStatus').cases %}
+    <option value="{{ status.value }}" {{ order.status == status ? 'selected' }}>
+        {{ status.name|trans }}
+    </option>
+{% endfor %}
+
+{# Dynamic case access #}
+{% set case_name = 'Active' %}
+{{ enum('App\\Enum\\Status').(case_name).value }}
+```
+
+**Don't:**
+
+```twig
+{% if order.status.value == 'paid' %}
+```
+
+### {% cache %} — Fragment Caching
+
+**Do:**
+
+```twig
+{% cache "product_card;v1;" ~ product.id ~ ";" ~ product.updatedAt.timestamp
+    ttl(3600) tags(['product-' ~ product.id]) %}
+    <div class="product-card">
+        {{ product.name }} — {{ product.price|format_currency('EUR') }}
+    </div>
+{% endcache %}
+```
+
+### {% types %} — Variable Type Declarations
+
+**Do:**
+
+```twig
+{% types {
+    product: 'App\\Entity\\Product',
+    is_preview?: 'boolean',
+    tags?: 'string[]',
+} %}
+
+<h1>{{ product.name }}</h1>
+```
+
+### Null-Safe Operator and Null Coalescing
+
+**Do:**
+
+```twig
+{{ user?.address?.city ?? 'N/A' }}
+{{ order?.customer?.company?.name }}
+
+{# Dynamic attribute access #}
+{{ user.('first-name') }}
+{{ object.(dynamicMethod)() }}
+```
+
+**Don't:**
+
+```twig
+{% if user is defined and user.address is not null %}
+    {{ user.address.city }}
+{% else %}
+    N/A
+{% endif %}
+```
+
+### {% embed %} — Micro-Layout Skeletons
+
+**Do:**
+
+```twig
+{# templates/_card.html.twig #}
+<div class="card">
+    <div class="card-header">{% block header %}{% endblock %}</div>
+    <div class="card-body">{% block body %}{% endblock %}</div>
+</div>
+
+{# Usage — override blocks in-place #}
+{% embed '_card.html.twig' %}
+    {% block header %}Order #{{ order.id }}{% endblock %}
+    {% block body %}
+        {{ order.total|format_currency('EUR') }}
+    {% endblock %}
+{% endembed %}
+```
+
+**Don't:** Create separate include templates for each card variation when they share the same structure.
+
+### |u and |slug — Unicode String Operations
+
+**Do:**
+
+```twig
+{{ title|u.truncate(50, '…') }}
+{{ title|u.truncate(100, '…', false) }}
+{{ article.body|u.wordwrap(80) }}
+{{ 'UserProfile'|u.snake }}
+{{ 'some_method'|u.camel.title }}
+{{ title|u.truncate(30).upper }}
+{{ 'Héllo Wörld'|slug }}
+```
+
+**Don't:**
+
+```twig
+{{ title|slice(0, 50) }}…
+```
+
+### String Interpolation and Shorthand Mappings
+
+**Do:**
+
+```twig
+{{ "Hello #{user.name}, you have #{count} items" }}
+
+{# Shorthand mapping keys (v3.12) #}
+{% set data = {name, email, role} %}
+
+{# Spread operator #}
+{% set merged = {class: 'btn', ...attrs} %}
+{{ 'Hello %s %s!'|format(...names) }}
+```
+
+**Don't:**
+
+```twig
+{{ 'Hello ' ~ user.name ~ ', you have ' ~ count ~ ' items' }}
+```
+
+### {% guard %} — Conditional Compilation
+
+**Do:**
+
+```twig
+{% guard function importmap %}
+    {{ importmap('app') }}
+{% else %}
+    <script src="{{ asset('build/app.js') }}"></script>
+{% endguard %}
+```
+
+### {% apply %} — Block-Level Filters
+
+**Do:**
+
+```twig
+{% apply spaceless %}
+    <nav>
+        <ul>
+            {% for item in menu %}
+                <li><a href="{{ item.url }}">{{ item.label }}</a></li>
+            {% endfor %}
+        </ul>
+    </nav>
+{% endapply %}
+```
+
+### Macros — Named Arguments and Self-Reference
+
+**Do:**
+
+```twig
+{% macro icon(name, size = 16, class = '') %}
+    <svg class="icon {{ class }}" width="{{ size }}" height="{{ size }}">
+        <use href="#icon-{{ name }}"/>
+    </svg>
+{% endmacro %}
+
+{{ _self.icon(name: 'check', size: 24, class: 'text-green') }}
+```
+
+### Destructuring (v3.23)
+
+**Do:**
+
+```twig
+{% do {name, email} = user %}
+<p>{{ name }} ({{ email }})</p>
+
+{% do [first, , third] = items %}
+
+{# Rename during destructuring #}
+{% do {name: userName, email: userEmail} = user %}
+```
+
+### Inline Comments (v3.15)
+
+**Do:**
+
+```twig
+{{
+    product.price # raw price before tax
+    |format_currency('EUR')
+}}
+```
+
+### |sanitize_html — Safe User HTML
+
+**Do:**
+
+```twig
+{{ user_content|sanitize_html }}
+```
+
+**Don't:**
+
+```twig
+{{ user_content|raw }}
+```
+
+### {% deprecated %} — Template Deprecation
+
+**Do:**
+
+```twig
+{% deprecated 'Use "sidebar.html.twig" instead.' package='app' version='2.0' %}
+{% include 'sidebar.html.twig' %}
+```
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| `|date` for user-facing output | `|format_datetime` — locale-aware via ICU |
+| `|number_format` for currency | `|format_currency('EUR')` — symbol, grouping, locale |
+| `|slice` on multi-byte strings | `|u.truncate()` — Unicode-safe |
+| String concat for CSS classes | `html_classes()` or `html_cva()` |
+| Magic strings for enum values | `enum('App\\Enum\\Status').Active` — compile-time validated |
+| Missing `twig/extra-bundle` | Required for `|u`, `|slug`, `|format_*`, `html_cva`, `{% cache %}` |
+| `attribute()` for dynamic access | Deprecated v3.15 — use `object.(method)` syntax |
+| `{% filter %}` tag | Removed — use `{% apply %}` instead |
+| Verbose null checks | `?.` null-safe (v3.23) + `??` null coalescing |
+| Copy-pasting card structures | `{% embed %}` for micro-layouts with overridable blocks |
+| `|raw` on user content | `|sanitize_html` — allows safe subset of HTML |
+| Positional args in complex calls | Named arguments with `:` — self-documenting, order-independent |

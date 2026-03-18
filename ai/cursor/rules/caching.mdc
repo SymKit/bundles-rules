@@ -1,0 +1,273 @@
+---
+description: "Caching: HTTP cache, app cache pools, decorator, tag invalidation, stampede, ESI."
+alwaysApply: false
+globs: src/**/*.php
+version: 1.7.0
+---
+
+# Caching
+
+For authenticated endpoint cache policies (`Vary: Authorization`), see `security.mdc`.
+
+## Core Principles
+
+1. **Two layers, two responsibilities** — HTTP cache protects infrastructure (Varnish, CDN, Symfony HttpCache). Application cache protects the database (Redis, APCu). Never mix them.
+2. **Decorator pattern** — Cache lives in a decorator implementing the same interface as the real repository. Business code is cache-unaware.
+3. **Tag-based invalidation** — Tag every cached entry. Invalidate by tag on write operations. No manual key management.
+4. **Private by default on auth** — Authenticated endpoints MUST return `Cache-Control: private`. No exceptions.
+5. **Stampede prevention** — Use lock-based warming or probabilistic early expiry. Never let expired keys trigger parallel regeneration.
+6. **Separate pools** — One pool per domain concern (products, routing, API responses). Different backends, independent purging.
+7. **ESI for mixed TTLs** — Use Edge Side Includes (`render_esi()` — see `twig.mdc`) when a page mixes public and dynamic content. Only the ESI fragment hits PHP.
+8. **Attributes over manual headers** — Use `#[Cache]` attributes or centralized listeners. Never set `Cache-Control` directly in controllers.
+9. **Test cache headers** — Functional tests assert `Cache-Control`, `Vary`, and `ETag` headers. Detect regressions automatically.
+10. **ArrayAdapter in tests** — Unit-test decorators with `ArrayAdapter`. Never mock Redis or Memcached.
+
+---
+
+## Conventions
+
+### HTTP Cache — Cache-Control Headers
+
+**Do:**
+
+```php
+use Symfony\Component\HttpKernel\Attribute\Cache;
+
+#[Route('/api/products/{id}', methods: ['GET'])]
+#[Cache(maxAge: 3600, public: true, vary: ['Accept'])]
+public function show(string $id): Response
+{
+    // ...
+}
+```
+
+**Don't:**
+
+```php
+public function show(string $id): Response
+{
+    $response = new Response();
+    $response->headers->set('Cache-Control', 'public, max-age=3600');
+    // Manual header manipulation — scattered, error-prone
+    return $response;
+}
+```
+
+### Private Cache on Authenticated Endpoints
+
+**Do:**
+
+```php
+#[Route('/api/me', methods: ['GET'])]
+#[Cache(maxAge: 0, public: false, vary: ['Authorization'])]
+public function profile(): Response
+{
+    // Cache-Control: private, Vary: Authorization
+}
+```
+
+**Don't:**
+
+```php
+#[Route('/api/me', methods: ['GET'])]
+#[Cache(maxAge: 300, public: true)]
+public function profile(): Response
+{
+    // SECURITY BREACH — user A sees user B's cached data
+}
+```
+
+### stale-while-revalidate and stale-if-error
+
+**Do:**
+
+```php
+use Symfony\Component\HttpFoundation\Response;
+
+public function onKernelResponse(ResponseEvent $event): void
+{
+    $response = $event->getResponse();
+    if ($response->headers->hasCacheControlDirective('public')) {
+        $response->headers->addCacheControlDirective('stale-while-revalidate', '60');
+        $response->headers->addCacheControlDirective('stale-if-error', '86400');
+    }
+}
+```
+
+**Don't:** Omit resilience directives — backend downtime returns errors instead of stale content.
+
+### Application Cache — Separate Pools
+
+**Do:**
+
+```yaml
+# config/packages/framework.yaml
+framework:
+  cache:
+    app: cache.adapter.redis
+    default_redis_provider: '%env(REDIS_DSN)%'
+    pools:
+      cache.products:
+        adapter: cache.adapter.redis
+        default_lifetime: 3600
+      cache.api_responses:
+        adapter: cache.adapter.redis
+        default_lifetime: 300
+      cache.routing:
+        adapter: cache.adapter.apcu
+        default_lifetime: 86400
+```
+
+**Don't:** Use a single default pool for everything — purging one domain clears unrelated caches.
+
+### Decorator Pattern — CachedRepository
+
+**Do:**
+
+```php
+final class CachedProductRepository implements ProductRepositoryInterface
+{
+    public function __construct(
+        private readonly ProductRepositoryInterface $inner,
+        private readonly CacheInterface $cache,
+    ) {}
+
+    public function getById(string $id): ?Product
+    {
+        return $this->cache->get('product-' . $id, function (ItemInterface $item) use ($id) {
+            $item->expiresAfter(3600);
+            $item->tag(['product-' . $id]);
+            return $this->inner->getById($id);
+        });
+    }
+}
+```
+
+**Don't:**
+
+```php
+final class ProductRepository
+{
+    public function getById(string $id): ?Product
+    {
+        $cached = $this->cache->get('product-' . $id);
+        if ($cached) {
+            return $cached;
+        }
+        $product = $this->em->find(Product::class, $id);
+        $this->cache->set('product-' . $id, $product, 3600);
+        return $product;
+        // Cache logic mixed with persistence — violates SRP, untestable
+    }
+}
+```
+
+### Tag-Based Invalidation
+
+**Do:**
+
+```php
+final class ProductCacheInvalidationListener
+{
+    public function __construct(
+        private readonly TagAwareCacheInterface $cache,
+    ) {}
+
+    public function __invoke(ProductUpdatedEvent $event): void
+    {
+        $this->cache->invalidateTags(['product-' . $event->productId]);
+    }
+}
+```
+
+**Don't:** Delete cache keys manually by guessing key names — fragile and misses related entries.
+
+### ESI Fragments
+
+**Do:**
+
+```twig
+{# Public page with dynamic user cart via ESI #}
+<div class="page-content">
+    {{ render_esi(controller('App\\Controller\\CartController::widget')) }}
+</div>
+```
+
+```php
+#[Route('/cart/widget', methods: ['GET'])]
+#[Cache(maxAge: 0, public: false)]
+public function widget(): Response
+{
+    // Only this fragment runs PHP on cache miss
+}
+```
+
+**Don't:** Make the entire page private because one small section is user-specific.
+
+### Stampede Prevention
+
+**Do:**
+
+```php
+use Symfony\Contracts\Cache\CacheInterface;
+use Symfony\Contracts\Cache\ItemInterface;
+
+$value = $this->cache->get('expensive-key', function (ItemInterface $item) {
+    $item->expiresAfter(3600);
+    // Symfony CacheInterface uses locking internally to prevent stampede
+    return $this->computeExpensiveValue();
+});
+```
+
+**Don't:**
+
+```php
+$item = $this->pool->getItem('expensive-key');
+if (!$item->isHit()) {
+    // 1000 concurrent requests all enter here simultaneously
+    $item->set($this->computeExpensiveValue());
+    $item->expiresAfter(3600);
+    $this->pool->save($item);
+}
+```
+
+### Testing Cache Headers
+
+**Do:**
+
+```php
+public function testProductListReturnsPublicCacheHeaders(): void
+{
+    $client = static::createClient();
+    $client->request('GET', '/api/products');
+
+    self::assertResponseIsSuccessful();
+    self::assertResponseHeaderSame('Cache-Control', 'max-age=3600, public');
+}
+
+public function testAuthenticatedEndpointHasPrivateCache(): void
+{
+    $client = static::createClient();
+    $client->loginUser($this->user);
+    $client->request('GET', '/api/me');
+
+    self::assertResponseHeaderSame('Cache-Control', 'private');
+    self::assertResponseHeaderSame('Vary', 'Authorization');
+}
+```
+
+**Don't:** Skip cache header assertions — a session added by mistake silently downgrades to `private`.
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| Cache stampede (dogpile) | `CacheInterface::get()` (lock-based), not `getItem()` + `isHit()` |
+| Missing Vary header | `#[Cache(vary: ['Accept'])]` for content-negotiated responses |
+| Private data cached publicly | Auth endpoints MUST use `public: false` + `Vary: Authorization` |
+| No invalidation strategy | Tag all entries. `invalidateTags()` on domain events |
+| ESI without reverse proxy | Enable `framework.esi: true`. HttpCache in dev, Varnish in prod |
+| Cache key collisions | Prefix keys with type constant: `product-123`, `category-456` |
+| Caching exceptions | `CacheInterface::get()` only caches on success. Never catch inside callback |

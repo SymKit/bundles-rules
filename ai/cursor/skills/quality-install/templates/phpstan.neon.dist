@@ -1,0 +1,10 @@
+parameters:
+    level: 9
+    paths:
+        - src
+    tmpDir: .phpstan-cache
+    # NEVER use baselines — fix all errors instead
+
+# Symfony extension — uncomment when phpstan/phpstan-symfony is installed
+# includes:
+#     - vendor/phpstan/phpstan-symfony/extension.neon

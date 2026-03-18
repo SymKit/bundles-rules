@@ -27,6 +27,7 @@ final class DefaultEditorConfigProviderTest extends TestCase
         self::assertSame('.cursor/skills', $config->skillsDir);
         self::assertSame('mdc', $config->fileExtension);
         self::assertNotNull($config->contentConverter);
+        self::assertSame('.cursor/agents', $config->agentsDir);
     }
 
     #[Test]
@@ -39,6 +40,7 @@ final class DefaultEditorConfigProviderTest extends TestCase
         self::assertSame('.claude/rules/skills', $config->skillsDir);
         self::assertSame('md', $config->fileExtension);
         self::assertNotNull($config->contentConverter);
+        self::assertSame('.claude/agents', $config->agentsDir);
     }
 
     #[Test]
@@ -51,6 +53,7 @@ final class DefaultEditorConfigProviderTest extends TestCase
         self::assertSame('.windsurf/rules/skills', $config->skillsDir);
         self::assertSame('md', $config->fileExtension);
         self::assertNotNull($config->contentConverter);
+        self::assertSame('.windsurf/agents', $config->agentsDir);
     }
 
     #[Test]
@@ -63,6 +66,7 @@ final class DefaultEditorConfigProviderTest extends TestCase
         self::assertSame('.agent/rules/skills', $config->skillsDir);
         self::assertSame('md', $config->fileExtension);
         self::assertNotNull($config->contentConverter);
+        self::assertSame('.agent/agents', $config->agentsDir);
     }
 
     #[Test]

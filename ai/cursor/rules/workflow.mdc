@@ -1,0 +1,342 @@
+---
+description: "Workflow: state machine, enum places/transitions, guards, subscribers, apply() in handlers."
+alwaysApply: false
+globs: src/**/*.php,config/**/*.yaml,config/**/*.yml
+version: 1.7.0
+---
+
+# Workflow
+
+For entity mapping (`#[ORM\Entity]`, `EntityManager`), see `doctrine.mdc`. For guard authorization (`AuthorizationCheckerInterface`), see `security.mdc`. For transition matrix tests, see `testing.mdc`.
+
+## Core Principles
+
+1. **State machine by default** — Use `type: state_machine` (one active state). Switch to `workflow` (Petri net, parallel states) only when the business explicitly requires concurrent states.
+2. **Enums for Places and Transitions** — PHP 8.1+ backed enums for all states and transitions. Type-safe, IDE-friendly, no string typos in production.
+3. **Entity ignores Workflow** — The entity stores the state property and provides business getters. It knows nothing about the Workflow component.
+4. **apply() in Handlers only** — `$workflow->apply()` belongs in Command Handlers or application services. Never in controllers, CLI commands, or entities.
+5. **Side effects via Subscribers** — Actions triggered by state changes (emails, logs, events) live in dedicated event subscribers on `workflow.transition`, `workflow.entered`, or `workflow.completed`.
+6. **Guards in PHP, not YAML** — Guard logic beyond simple role checks goes in `workflow.guard` event listeners. YAML ExpressionLanguage is not testable or analyzable by PHPStan.
+7. **One config file per domain** — Workflow YAML in `config/packages/workflows/`. One file per bounded context (e.g., `invoice_workflow.yaml`).
+8. **Transactions around transitions** — `apply()` + `flush()` wrapped in a database transaction. Pessimistic locking under concurrency.
+9. **Living documentation** — `workflow:dump` generates graphs in CI. The generated diagram is the source of truth for the business.
+10. **Transition matrix tests** — `@dataProvider` covering every valid and invalid transition. Full state machine contract at low cost. See `testing.mdc` for test conventions.
+
+---
+
+## Conventions
+
+### Enums for Places and Transitions
+
+**Do:**
+
+```php
+enum OrderState: string
+{
+    case DRAFT = 'draft';
+    case CONFIRMED = 'confirmed';
+    case SHIPPED = 'shipped';
+    case DELIVERED = 'delivered';
+    case CANCELLED = 'cancelled';
+}
+
+enum OrderTransition: string
+{
+    case CONFIRM = 'confirm';
+    case SHIP = 'ship';
+    case DELIVER = 'deliver';
+    case CANCEL = 'cancel';
+}
+```
+
+**Don't:**
+
+```php
+class Order
+{
+    private string $state = 'draft';
+
+    public function setState(string $state): void
+    {
+        $this->state = $state;
+        // String-based — typos compile fine, no IDE completion, no exhaustive match
+    }
+}
+```
+
+### YAML Configuration with Enum References
+
+**Do:**
+
+```yaml
+# config/packages/workflows/order_workflow.yaml
+framework:
+  workflows:
+    order:
+      type: state_machine
+      marking_store:
+        type: method
+        property: state
+      supports:
+        - App\Order\Entity\Order
+      places:
+        - !php/const App\Order\Workflow\OrderState::DRAFT->value
+        - !php/const App\Order\Workflow\OrderState::CONFIRMED->value
+        - !php/const App\Order\Workflow\OrderState::SHIPPED->value
+        - !php/const App\Order\Workflow\OrderState::DELIVERED->value
+        - !php/const App\Order\Workflow\OrderState::CANCELLED->value
+      transitions:
+        !php/const App\Order\Workflow\OrderTransition::CONFIRM->value:
+          from: !php/const App\Order\Workflow\OrderState::DRAFT->value
+          to: !php/const App\Order\Workflow\OrderState::CONFIRMED->value
+        !php/const App\Order\Workflow\OrderTransition::SHIP->value:
+          from: !php/const App\Order\Workflow\OrderState::CONFIRMED->value
+          to: !php/const App\Order\Workflow\OrderState::SHIPPED->value
+        !php/const App\Order\Workflow\OrderTransition::CANCEL->value:
+          from:
+            - !php/const App\Order\Workflow\OrderState::DRAFT->value
+            - !php/const App\Order\Workflow\OrderState::CONFIRMED->value
+          to: !php/const App\Order\Workflow\OrderState::CANCELLED->value
+```
+
+**Don't:**
+
+```yaml
+# Hardcoded strings — no type safety, drift between code and config
+framework:
+  workflows:
+    order:
+      places: [draft, confirmed, shipped]
+      transitions:
+        confirm:
+          from: draft
+          to: confirmed
+```
+
+### Entity — State-Aware, Workflow-Ignorant
+
+**Do:**
+
+```php
+#[ORM\Entity]
+final class Order
+{
+    #[ORM\Column(enumType: OrderState::class)]
+    private OrderState $state = OrderState::DRAFT;
+
+    public function getState(): string
+    {
+        return $this->state->value;
+    }
+
+    public function setState(string $state): void
+    {
+        $this->state = OrderState::from($state);
+    }
+
+    public function isDraft(): bool
+    {
+        return $this->state === OrderState::DRAFT;
+    }
+}
+```
+
+**Don't:**
+
+```php
+use Symfony\Component\Workflow\WorkflowInterface;
+
+final class Order
+{
+    public function confirm(WorkflowInterface $workflow): void
+    {
+        $workflow->apply($this, 'confirm');
+        // Entity depends on Workflow component — framework coupling in domain
+    }
+}
+```
+
+### apply() in Handlers Only
+
+**Do:**
+
+```php
+final class ConfirmOrderHandler
+{
+    public function __construct(
+        private readonly WorkflowInterface $orderWorkflow,
+        private readonly OrderRepositoryInterface $orders,
+    ) {}
+
+    public function __invoke(ConfirmOrderCommand $command): void
+    {
+        $order = $this->orders->get($command->orderId);
+        $this->orderWorkflow->apply($order, OrderTransition::CONFIRM->value);
+        $this->orders->save($order);
+    }
+}
+```
+
+**Don't:**
+
+```php
+#[Route('/order/{id}/confirm', methods: ['POST'])]
+public function confirm(Order $order, WorkflowInterface $orderWorkflow): Response
+{
+    $orderWorkflow->apply($order, 'confirm');
+    $this->em->flush();
+    // apply() in controller — business logic in HTTP layer, untestable
+    return $this->redirectToRoute('app_order_show', ['id' => $order->getId()]);
+}
+```
+
+### Guard Listener for Transition Validation
+
+**Do:**
+
+```php
+final class OrderWorkflowGuardListener implements EventSubscriberInterface
+{
+    public function __construct(
+        private readonly AuthorizationCheckerInterface $auth,
+    ) {}
+
+    public static function getSubscribedEvents(): array
+    {
+        return ['workflow.order.guard.ship' => 'guardShip'];
+    }
+
+    public function guardShip(GuardEvent $event): void
+    {
+        if (!$this->auth->isGranted('ROLE_WAREHOUSE')) {
+            $event->setBlocked(true, 'Only warehouse staff can ship orders.');
+        }
+    }
+}
+```
+
+**Don't:**
+
+```yaml
+# Guard in YAML ExpressionLanguage — not unit-testable, not PHPStan-analyzable
+transitions:
+  ship:
+    guard: "is_granted('ROLE_WAREHOUSE') and subject.getTotalAmount() > 0"
+```
+
+### Subscriber for Side Effects
+
+**Do:**
+
+```php
+final readonly class OrderShippedNotificationSubscriber implements EventSubscriberInterface
+{
+    public function __construct(
+        private NotificationServiceInterface $notifier,
+    ) {}
+
+    public static function getSubscribedEvents(): array
+    {
+        return ['workflow.order.entered.shipped' => 'onShipped'];
+    }
+
+    public function onShipped(EnteredEvent $event): void
+    {
+        $order = $event->getSubject();
+        $this->notifier->sendShipmentNotification($order->getId());
+    }
+}
+```
+
+**Don't:**
+
+```php
+public function __invoke(ShipOrderCommand $command): void
+{
+    $order = $this->orders->get($command->orderId);
+    $this->orderWorkflow->apply($order, OrderTransition::SHIP->value);
+    $this->orders->save($order);
+    $this->mailer->send($this->buildShipmentEmail($order));
+    $this->logger->info('Order shipped', ['id' => $order->getId()]);
+    // Side effects mixed with transition — SRP violated, not reusable
+}
+```
+
+### Transaction and Concurrency Safety
+
+**Do:**
+
+```php
+public function __invoke(ConfirmOrderCommand $command): void
+{
+    $this->em->wrapInTransaction(function () use ($command): void {
+        $order = $this->orders->getWithLock($command->orderId);
+        $this->orderWorkflow->apply($order, OrderTransition::CONFIRM->value);
+    });
+}
+```
+
+**Don't:** Call `apply()` and `flush()` outside a transaction — race conditions under concurrency corrupt state.
+
+### Transition Matrix Test
+
+**Do:**
+
+```php
+/** @dataProvider transitionMatrixProvider */
+public function testTransitionMatrix(
+    OrderState $initial,
+    OrderTransition $transition,
+    ?OrderState $expected,
+    bool $allowed,
+): void {
+    $order = OrderFactory::withState($initial);
+
+    if (!$allowed) {
+        $this->expectException(LogicException::class);
+    }
+
+    $this->workflow->apply($order, $transition->value);
+
+    if ($allowed) {
+        self::assertSame($expected->value, $order->getState());
+    }
+}
+
+public static function transitionMatrixProvider(): \Generator
+{
+    yield 'draft → confirm → confirmed' => [OrderState::DRAFT, OrderTransition::CONFIRM, OrderState::CONFIRMED, true];
+    yield 'confirmed → ship → shipped' => [OrderState::CONFIRMED, OrderTransition::SHIP, OrderState::SHIPPED, true];
+    yield 'draft → ship → blocked' => [OrderState::DRAFT, OrderTransition::SHIP, null, false];
+    yield 'shipped → confirm → blocked' => [OrderState::SHIPPED, OrderTransition::CONFIRM, null, false];
+    yield 'cancelled → ship → blocked' => [OrderState::CANCELLED, OrderTransition::SHIP, null, false];
+}
+```
+
+**Don't:** Test only the happy path — forbidden transitions are where bugs hide.
+
+### Living Documentation
+
+**Do:**
+
+```bash
+bin/console workflow:dump order | dot -Tpng -o doc/workflows/order.png
+```
+
+Integrate in CI as a build artifact or pre-commit hook to keep diagrams in sync.
+
+**Don't:** Maintain hand-drawn diagrams separately — they drift from code within days.
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| String-based places/transitions | Backed enums + `!php/const` in YAML config |
+| `apply()` in controllers | Encapsulate in Handler. Controller dispatches command |
+| Side effects in guards | Guards only `setBlocked()`. Side effects in `entered`/`completed` subscribers |
+| Missing transition documentation | `workflow:dump` in CI. Generated diagram = source of truth |
+| No transaction around `apply()` | `$em->wrapInTransaction()`. Pessimistic lock for concurrency |
+| `type: workflow` when single state | Default `state_machine`. Workflow only for parallel states |
+| God subscriber (all transitions) | Split per transition group or side-effect concern |

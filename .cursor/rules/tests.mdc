@@ -32,8 +32,10 @@ alwaysApply: false
 
 - `AiRulesInstaller::sync()` with temp directories:
   - Creates rules in target dir for each editor
+  - Copies `ai/AGENTS.md` to project root when present
+  - Copies `ai/cursor/agents/*.md` to each editor’s `agentsDir`
   - Converts `.mdc` to `.md` for Claude/Windsurf/Antigravity
-  - Copies non-`.mdc` files as-is (e.g. `scaffold_bundle.php`)
+  - Copies non-`.mdc` skill files as-is (e.g. PHP, templates)
   - Copies only selected skills
   - Never deletes existing files in target (merge-only)
   - Skips unknown editor names gracefully

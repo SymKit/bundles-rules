@@ -16,6 +16,7 @@ final readonly class EditorConfig
         public string $skillsDir,
         public string $fileExtension,
         public ?ContentConverterInterface $contentConverter,
+        public ?string $agentsDir = null,
     ) {
     }
 }

@@ -1,0 +1,34 @@
+# Deptrac — enforce architecture boundaries
+# Adapt layers and collectors to your project's actual structure.
+# Default: bounded contexts with Shared cross-cutting.
+# Run: make deptrac
+
+deptrac:
+    paths:
+        - ./src
+    exclude_files:
+        - '#.*Test\.php$#'
+
+    layers:
+        - name: Shared
+          collectors:
+              - type: directory
+                value: src/Shared/.*
+
+        # Add one layer per bounded context:
+        # - name: Billing
+        #   collectors:
+        #       - type: directory
+        #         value: src/Billing/.*
+        # - name: Catalog
+        #   collectors:
+        #       - type: directory
+        #         value: src/Catalog/.*
+
+    ruleset:
+        Shared: []
+        # Each context can depend on Shared but not on other contexts:
+        # Billing:
+        #     - Shared
+        # Catalog:
+        #     - Shared

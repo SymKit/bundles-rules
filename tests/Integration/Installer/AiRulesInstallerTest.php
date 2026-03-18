@@ -24,7 +24,7 @@ final class AiRulesInstallerTest extends TestCase
         $this->projectDir = $this->tempDir.'/project';
 
         mkdir($this->packageDir.'/ai/cursor/rules', 0o755, true);
-        mkdir($this->packageDir.'/ai/cursor/skills/symfony-bundle-core', 0o755, true);
+        mkdir($this->packageDir.'/ai/cursor/skills/feature', 0o755, true);
         mkdir($this->projectDir, 0o755, true);
 
         $this->installer = new AiRulesInstaller(DefaultEditorConfigProvider::create());
@@ -111,16 +111,16 @@ final class AiRulesInstallerTest extends TestCase
     public function syncCopiesNonMdcFilesAsIs(): void
     {
         file_put_contents(
-            $this->packageDir.'/ai/cursor/skills/symfony-bundle-core/scaffold_bundle.php',
+            $this->packageDir.'/ai/cursor/skills/feature/helper.php',
             '<?php echo "hello";',
         );
 
-        $context = new SyncContext($this->packageDir, $this->projectDir, ['cursor'], ['symfony-bundle-core']);
+        $context = new SyncContext($this->packageDir, $this->projectDir, ['cursor'], ['feature']);
         $this->installer->sync($context);
 
-        self::assertFileExists($this->projectDir.'/.cursor/skills/symfony-bundle-core/scaffold_bundle.php');
+        self::assertFileExists($this->projectDir.'/.cursor/skills/feature/helper.php');
         self::assertStringEqualsFile(
-            $this->projectDir.'/.cursor/skills/symfony-bundle-core/scaffold_bundle.php',
+            $this->projectDir.'/.cursor/skills/feature/helper.php',
             '<?php echo "hello";',
         );
     }
@@ -129,21 +129,21 @@ final class AiRulesInstallerTest extends TestCase
     public function syncCopiesOnlySelectedSkills(): void
     {
         file_put_contents(
-            $this->packageDir.'/ai/cursor/skills/symfony-bundle-core/SKILL.mdc',
-            "---\nname: core\n---\n# Core Skill",
+            $this->packageDir.'/ai/cursor/skills/feature/SKILL.mdc',
+            "---\nname: feature\n---\n# Feature Skill",
         );
 
-        mkdir($this->packageDir.'/ai/cursor/skills/symfony-bundle-ux', 0o755, true);
+        mkdir($this->packageDir.'/ai/cursor/skills/commit', 0o755, true);
         file_put_contents(
-            $this->packageDir.'/ai/cursor/skills/symfony-bundle-ux/SKILL.mdc',
-            "---\nname: ux\n---\n# UX Skill",
+            $this->packageDir.'/ai/cursor/skills/commit/SKILL.mdc',
+            "---\nname: commit\n---\n# Commit Skill",
         );
 
-        $context = new SyncContext($this->packageDir, $this->projectDir, ['cursor'], ['symfony-bundle-core']);
+        $context = new SyncContext($this->packageDir, $this->projectDir, ['cursor'], ['feature']);
         $this->installer->sync($context);
 
-        self::assertFileExists($this->projectDir.'/.cursor/skills/symfony-bundle-core/SKILL.mdc');
-        self::assertFileDoesNotExist($this->projectDir.'/.cursor/skills/symfony-bundle-ux/SKILL.mdc');
+        self::assertFileExists($this->projectDir.'/.cursor/skills/feature/SKILL.mdc');
+        self::assertFileDoesNotExist($this->projectDir.'/.cursor/skills/commit/SKILL.mdc');
     }
 
     #[Test]
@@ -195,6 +195,33 @@ final class AiRulesInstallerTest extends TestCase
         self::assertFileExists($this->projectDir.'/.claude/rules/test-rule.md');
         self::assertFileExists($this->projectDir.'/.windsurf/rules/test-rule.md');
         self::assertFileExists($this->projectDir.'/.agent/rules/test-rule.md');
+    }
+
+    #[Test]
+    public function syncCopiesAgentsMdToProjectRoot(): void
+    {
+        file_put_contents($this->packageDir.'/ai/AGENTS.md', "# Bundle Kit\n\nHello.");
+
+        $context = new SyncContext($this->packageDir, $this->projectDir, ['cursor'], []);
+        $this->installer->sync($context);
+
+        self::assertFileExists($this->projectDir.'/AGENTS.md');
+        self::assertStringEqualsFile($this->projectDir.'/AGENTS.md', "# Bundle Kit\n\nHello.");
+    }
+
+    #[Test]
+    public function syncCopiesAgentMarkdownFilesPerEditor(): void
+    {
+        mkdir($this->packageDir.'/ai/cursor/agents', 0o755, true);
+        file_put_contents($this->packageDir.'/ai/cursor/agents/pm.md', "---\nname: pm\n---\n# PM");
+
+        $context = new SyncContext($this->packageDir, $this->projectDir, ['cursor', 'claude'], []);
+        $this->installer->sync($context);
+
+        self::assertFileExists($this->projectDir.'/.cursor/agents/pm.md');
+        self::assertStringEqualsFile($this->projectDir.'/.cursor/agents/pm.md', "---\nname: pm\n---\n# PM");
+        self::assertFileExists($this->projectDir.'/.claude/agents/pm.md');
+        self::assertStringEqualsFile($this->projectDir.'/.claude/agents/pm.md', "---\nname: pm\n---\n# PM");
     }
 
     private function removeDirectory(string $dir): void

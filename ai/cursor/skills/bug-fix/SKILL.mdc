@@ -1,0 +1,93 @@
+---
+name: bug-fix
+description: >-
+  Light skill: TDD pipeline for bug fixes. Regression test first, then fix.
+  Can auto-invoke when the user reports a bug, describes unexpected behavior, or asks to fix an issue.
+version: 2.0.0
+---
+
+# Bug Fix Pipeline
+
+TDD-driven pipeline for fixing bugs: PM captures reproduction and impact, Architect analyzes root cause and minimal fix surface, Main agent writes failing regression test first then fixes and triggers QA to verify bug fixed with no regressions.
+
+## When to Use
+
+- User reports a bug or unexpected behavior
+- User describes "it should X but it does Y"
+- User asks to fix an issue, defect, or incorrect behavior
+- Can auto-invoke when the user clearly describes a bug scenario
+- Do NOT use when: user wants new functionality (use `/feature`) or code refactoring (use `/refactor`)
+
+## Instructions
+
+### Phase 0: Initial Triage
+
+Use the ask question tool to clarify:
+- "Can you describe the exact steps to reproduce?"
+- "What did you expect to happen versus what actually happened?"
+- "When did this start occurring (recent change, specific version)?"
+
+### Phase 1: PM Subagent (Reproduction & Scope)
+
+Launch the PM subagent with the task:
+
+1. Reproduce the bug — understand the exact reproduction path
+2. Document expected vs actual behavior
+3. Capture reproduction steps (minimal, reproducible)
+4. Assess impact — what users/features are affected?
+5. Produce a concise bug specification (no need for full docs/stories/ — can be in-context or a short doc)
+
+**Output:** Bug spec with reproduction path, expected vs actual, impact.
+
+### Phase 2: Architect Subagent (Root Cause)
+
+Launch the Architect subagent in **readonly** mode with the task:
+
+1. Root cause analysis — where does the bug originate? why does it occur?
+2. Minimal fix surface — what is the smallest change that fixes the bug?
+3. Regression risk areas — what other code paths or tests might be affected?
+4. List applicable rules from `.cursor/rules/` (e.g. `testing.mdc` for TDD, relevant domain rules)
+5. Recommend where the regression test should live and what it must assert
+
+**Output:** Root cause, minimal fix approach, regression risk map, applicable rules.
+
+### Phase 3: Main Agent (TDD Fix & QA)
+
+You (the main agent) implement. TDD is mandatory.
+
+1. Read `testing.mdc` and any rules the Architect listed
+2. Write the FAILING regression test FIRST — the test must reproduce the exact bug scenario and fail (red)
+3. Run `make tests` — confirm the new test fails as expected
+4. Implement the fix
+5. Run `make tests` — confirm the regression test now passes (green)
+6. Run `make ci` — full pipeline; fix any issues
+
+**Critical order:** Red (failing test) → Green (fix) → Refactor if needed. Never fix before the regression test exists.
+
+**Final Verification (QA):** Once the fix is complete, automatically launch the QA subagent (fast model) with the task:
+1. Verify the bug is fixed — reproduction scenario no longer occurs
+2. Verify no regressions — existing tests still pass
+3. Verify the regression test covers the exact scenario — it would have caught the bug before the fix
+4. Run `make ci` — report pass/fail
+5. Produce verdict: APPROVED / NEEDS CHANGES / REJECTED
+
+**Output:** QA review with verdict, bug fix confirmation, regression test validity.
+
+**User validation:** Present results. If QA rejects or user reports the bug persists, return to Phase 3.
+
+## Exit Checklist (MANDATORY before concluding)
+
+- [ ] Bug reproduction path documented
+- [ ] Regression test written FIRST (failed before fix)
+- [ ] Fix implemented — regression test now passes
+- [ ] `make ci` passes
+- [ ] QA subagent launched automatically and confirmed bug fixed and no regressions
+- [ ] Regression test would have caught the bug (covers exact scenario)
+
+## On Failure
+
+- If bug cannot be reproduced: ask user for more details, environment info, or a minimal repro; consider asking for a failing test case
+- If regression test does not fail initially: the test is wrong — it must assert the correct (currently broken) behavior; revise the test
+- If fix breaks existing tests: analyze regression risk, adjust fix or add additional test coverage
+- If `make ci` fails: address each reported issue, re-run until green
+- If stuck after 3 attempts: ask the user for guidance

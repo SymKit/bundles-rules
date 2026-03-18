@@ -1,0 +1,285 @@
+---
+description: "Security: JWT, Voters, rate limiting, CORS, OWASP API Top 10 (bundle-exposed endpoints)."
+alwaysApply: false
+globs: src/**/*.php
+version: 1.7.0
+---
+
+# Security
+
+For QueryBuilder parameterization, see `doctrine.mdc`. For serialization groups, see `api.mdc` and `api-platform.mdc`. For SSRF prevention, see `http-client.mdc`. For PII masking, see `observability.mdc`. For static analysis, see `quality-pipeline.mdc`.
+
+## Core Principles
+
+1. **JWT in HttpOnly/Secure/SameSite=Strict cookie** — Tokens in cookies, never in localStorage or response body.
+2. **Voters on entities** — Access control based on domain entities and roles. Never URL-only rules. `access_control` is first-match-wins.
+3. **Rate limiting on sensitive endpoints** — Sliding window on login, registration, password reset, contact, webhooks.
+4. **Strict CORS** — No wildcards on authenticated endpoints. Explicit origins only.
+5. **Multi-level IP filtering** — WAF → web server (Apache/nginx) → application (`security.yaml`). Defense in depth.
+6. **UUID for all exposed identifiers** — No sequential IDs. Prevents enumeration and info leakage. See `doctrine.mdc` for UUID v7 implementation patterns.
+7. **composer audit in CI** — Run every pipeline. Block on vulnerabilities.
+8. **No secrets in code** — All secrets via env vars, `.env.local` (gitignored), or Symfony secrets vault. Never in committed `.env`.
+9. **Input validation on DTOs** — See `dto.mdc` for DTO validation patterns. Never `$request->get()` without type validation.
+10. **OWASP API Security Top 10** — Address each risk with Symfony-specific mitigations.
+
+---
+
+## Conventions
+
+### JWT in HttpOnly Cookie
+
+**Do:**
+
+```php
+final class JwtCookieBuilder
+{
+    public function createAuthCookie(string $token, int $ttl): Cookie
+    {
+        return Cookie::create('auth_token')
+            ->withValue($token)
+            ->withExpires(time() + $ttl)
+            ->withHttpOnly(true)
+            ->withSecure(true)
+            ->withSameSite(Cookie::SAMESITE_STRICT)
+            ->withPath('/');
+    }
+}
+```
+
+**Don't:**
+
+```php
+return new JsonResponse(['token' => $jwt]);  // XSS can steal from JS
+```
+
+### Voters on Entities (Not URL-Only)
+
+**Do:**
+
+```php
+#[IsGranted('VIEW', subject: 'order')]
+public function show(Order $order): Response { /* ... */ }
+```
+
+**Don't:**
+
+```yaml
+access_control:
+    - { path: ^/api/orders, roles: ROLE_USER }  # No entity-level check — IDOR
+```
+
+### access_control Order (First Match Wins)
+
+**Do:**
+
+```yaml
+security:
+    access_control:
+        - { path: ^/api/admin, roles: ROLE_ADMIN }
+        - { path: ^/api/internal, roles: ROLE_INTERNAL, ips: [203.0.113.0/24] }
+        - { path: ^/api, roles: ROLE_USER }
+        - { path: ^/, roles: PUBLIC_ACCESS }
+```
+
+**Don't:**
+
+```yaml
+access_control:
+    - { path: ^/, roles: PUBLIC_ACCESS }       # Matches everything first!
+    - { path: ^/api/admin, roles: ROLE_ADMIN } # Never reached
+```
+
+### Multi-Level IP Filtering
+
+**Do:**
+
+```apache
+<Location /api/internal>
+    Require all denied
+    Require IP 203.0.113.0/24
+    Require IP 198.51.100.0/24
+</Location>
+```
+
+```yaml
+security:
+    access_control:
+        - { path: ^/api/admin, roles: ROLE_ADMIN, ips: [203.0.113.0/24] }
+```
+
+**Don't:**
+
+```yaml
+# No IP filtering — sensitive endpoints open to the internet
+```
+
+### Rate Limiting (Sliding Window)
+
+**Do:**
+
+```yaml
+framework:
+    rate_limiter:
+        login:
+            policy: sliding_window
+            limit: 5
+            interval: '1 minute'
+        api:
+            policy: sliding_window
+            limit: 1000
+            interval: '1 hour'
+        api_write:
+            policy: sliding_window
+            limit: 100
+            interval: '1 hour'
+```
+
+```php
+$limiter = $user
+    ? $this->authLimiter->create($user->getUserIdentifier())
+    : $this->anonLimiter->create($request->getClientIp());
+if (!$limiter->consume(1)->isAccepted()) {
+    throw new TooManyRequestsHttpException(null, 'Rate limit exceeded.');
+}
+```
+
+**Don't:**
+
+```php
+// No rate limiting on login/register/password-reset — brute force risk
+```
+
+### Strict CORS
+
+**Do:**
+
+```yaml
+nelmio_cors:
+    paths:
+        '^/api/':
+            origin_regex: true
+            allow_origin: ['https://app.example.com', 'https://admin.example.com']
+            allow_credentials: true
+            allow_methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+            allow_headers: ['Authorization', 'Content-Type']
+            max_age: 3600
+```
+
+**Don't:**
+
+```yaml
+allow_origin: ['*']      # Never on authenticated endpoints
+allow_credentials: true   # Incompatible with wildcard origin
+```
+
+### No Secrets in Code
+
+**Do:**
+
+```php
+$apiKey = $_ENV['STRIPE_API_KEY'] ?? throw new \RuntimeException('Missing key');
+```
+
+```bash
+php bin/console secrets:set STRIPE_API_KEY  # Symfony secrets vault
+```
+
+**Don't:**
+
+```php
+$apiKey = 'sk_live_xxx';  // Hardcoded — leaks via git history
+```
+
+### Input Validation on DTOs
+
+> See `dto.mdc` for complete DTO validation patterns, naming, and immutability conventions. See `api.mdc` for `#[MapRequestPayload]` automatic validation.
+
+From a security perspective, the critical points are:
+- **Always validate before processing** — `#[Assert\...]` on DTOs, never raw `$request->get()`
+- **`#[Assert\PasswordStrength]`** on password fields
+- **`#[Assert\Valid]`** for nested DTOs (cascade validation)
+- **Never trust client input** — even authenticated users can send malicious payloads
+
+### OWASP API Security Top 10
+
+| # | Risk | Symfony Mitigation |
+|---|------|--------------------|
+| API1 | Broken Object-Level Authorization | Voters on entities; never URL patterns alone |
+| API2 | Broken Authentication | `login_throttling`; JWT short exp (< 1h) |
+| API3 | Broken Property-Level Authorization | Serialization groups; separate read/write DTOs |
+| API4 | Unrestricted Resource Consumption | Rate limiter; pagination `max_items_per_page` |
+| API5 | Broken Function-Level Authorization | Strict `role_hierarchy`; Voters per operation |
+| API6 | Unrestricted Sensitive Business Flows | Rate limiter on password reset, webhooks |
+| API7 | SSRF | `NoPrivateNetworkHttpClient`; see `http-client.mdc` |
+| API8 | Security Misconfiguration | No debug in prod; strict CORS; `composer audit` |
+| API9 | Improper Inventory Management | Disable unused operations; version APIs |
+| API10 | Unsafe Third-Party Consumption | Validate external responses; timeout + circuit breaker |
+
+### Security-by-Design Controls (SBD)
+
+**Inputs & outputs (SBD-01–03):**
+- SBD-01: Validate all inputs via Symfony Validator or API Platform DTOs. Zero concatenation in Doctrine (QueryBuilder + `setParameter()` only).
+- SBD-02: Isolate system prompts (LLM); user data must not alter system instructions.
+- SBD-03: Rely on Twig auto-escaping (see `twig.mdc`); alert on `{{ var|raw }}`. Security headers: CSP, HSTS, X-Frame-Options.
+
+**Identity & access (SBD-04–06):**
+- SBD-04: `UserPasswordHasherInterface` (Argon2id); `login_throttling`; JWT with short exp (< 1h).
+- SBD-05: Default DENY; Voters or `#[IsGranted('VIEW', subject: 'entity')]`; no manual ID checks.
+- SBD-06: Strict `role_hierarchy`; separate app roles (ROLE_ARTICLE_EDITOR) from global admin (ROLE_SUPER_ADMIN).
+
+**Data & crypto (SBD-07–09):**
+- SBD-07: No credentials in committed `.env`; use Symfony secrets vault in production.
+- SBD-08: Only `sodium_*` or `random_bytes()`; reject md5, sha1, uniqid for security tokens.
+- SBD-09: Serialization groups; never leak emails, password hashes, or tokens in JSON.
+
+**Sessions & flow (SBD-10–13):**
+- SBD-10: `cookie_secure: auto`, `cookie_httponly: true`, `cookie_samesite: lax` (or strict).
+- SBD-11: `csrf_protection: true`; every state-changing form must verify CSRF. See `forms.mdc`.
+- SBD-12: File uploads: strict mime validation; store outside `public/` or use S3; filenames from UUID.
+- SBD-13: SSRF prevention on user-provided URLs. See `http-client.mdc` for `NoPrivateNetworkHttpClient`.
+
+**Resilience & monitoring (SBD-14–16):**
+- SBD-14: Dedicated security log channel. See `observability.mdc` for PII masking and Monolog processor conventions.
+- SBD-15: Rate limiter on sensitive endpoints (forgot password, contact, webhooks), not just login.
+- SBD-16: No stack traces in prod; generic error pages; no info disclosure.
+
+**Architecture & supply chain (SBD-17–22):**
+- SBD-17: CI must fail if `composer audit` fails.
+- SBD-18: Disable public API by default; limit GraphQL/REST depth (max_depth) to avoid DoS.
+- SBD-19: PHP not running as root; disable dangerous functions in php.ini.
+- SBD-20: Explicit strict CORS (no wildcard on authenticated).
+- SBD-21: Static analysis in CI. See `quality-pipeline.mdc` for PHPStan level 9 and CS-Fixer conventions.
+- SBD-22: Definition of Done: Voters implemented and tested; static checks pass; no secrets in source.
+
+### Red Flags Checklist (Reject Immediately)
+
+| Area | Red Flag |
+|------|----------|
+| Auth | `access_control` by URL only instead of Voters on entities |
+| Auth | Missing rate limiting on login/register/password-reset |
+| IDs | Exposed auto-increment IDs in API responses |
+| CORS | `allow_origin: ['*']` on authenticated endpoints |
+| Secrets | `.env` with real credentials committed to repository |
+| Debug | `APP_DEBUG=1` or Profiler enabled in production |
+| Crypto | Home-made crypto instead of `PasswordHasher` / `sodium_*` |
+| Input | `$request->get()` without DTO validation — see `dto.mdc` |
+| ORM | Raw DQL/SQL concatenation instead of `setParameter()` |
+| API | Entities exposed without DTOs — see `dto.mdc` |
+| CI | Missing `composer audit` in pipeline |
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| JWT in response body / localStorage | HttpOnly, Secure, SameSite=Strict cookie. Frontend never touches token |
+| URL-only access control (IDOR) | Voters on entities. Check ownership in `voteOnAttribute()` |
+| `access_control` order wrong | Most specific to least specific. First-match-wins |
+| Voter returns false for unhandled attrs | `supports()` must return `false` for unhandled attributes |
+| No rate limiting on auth endpoints | Sliding-window limiter on login/register/password-reset |
+| Wildcard CORS with credentials | Explicit origins only. No `allow_origin: ['*']` on authenticated |
+| Missing HTTPS/HSTS | HSTS header + `cookie_secure: auto` + force HTTPS in prod |
+| Secrets in committed `.env` | `.env.local` (gitignored), Symfony secrets vault, or external manager |
+| No `composer audit` in CI | Dependency audit in every pipeline. `make ci` includes it |
+| Auto-increment IDs in APIs | UUID v7 for all exposed identifiers |

@@ -1,0 +1,127 @@
+---
+name: onboard
+description: >-
+  Heavy skill: profile a Symfony bundle package (composer), generate Project DNA in AGENTS.md, adapt rules.
+  ONLY invoke when the user explicitly types /onboard. Never auto-apply.
+version: 2.0.0
+---
+
+# Onboard — Bundle Profiling
+
+Profile a **Symfony bundle** repository: `composer.json` (type, require, suggest), `src/`, `config/`, tests layout. Generate factual Project DNA in **AGENTS.md**. Adapt to what IS (AbstractBundle vs legacy Extension, XML services, optional Doctrine/UX).
+
+## When to Use
+
+- User explicitly types `/onboard` or requests project onboarding
+- User wants to adapt rules to an existing Symfony bundle package
+- Do NOT use when: user asks for a feature, bug fix, or quality setup (use the relevant skill)
+
+## Instructions
+
+### Step 1: Detect bundle root
+
+Use the directory containing the bundle's `composer.json` (package name usually `vendor/*-bundle`). If the workspace is monorepo, identify the bundle subfolder. If unclear, ask the user for the bundle root path.
+
+### Step 2: Read composer.json — Extract Project Metadata
+
+Read the project's `composer.json` and extract:
+- Symfony version (from `require` or `symfony/framework-bundle`)
+- Installed components relevant to boilerplate rules (see mapping below)
+- PHP version constraint
+- Dev dependencies for quality tooling
+
+**Rule-to-composer mapping (for Step 5):**
+- `coding-standards.mdc`, `architecture.mdc`, `quality-pipeline.mdc`, `dto.mdc`, `error-handling.mdc`, `api.mdc` → no specific package (always applicable)
+- `console-commands.mdc` → `symfony/console` (always present)
+- `doctrine.mdc` → `doctrine/orm` (typically present)
+- `testing.mdc` → `phpunit/phpunit` or `symfony/phpunit-bridge` (typically present)
+- `messenger.mdc` → `symfony/messenger`
+- `api-platform.mdc` → `api-platform/core` or `api-platform/api-platform`
+- `security.mdc` → `symfony/security-bundle`
+- `forms.mdc` → `symfony/form`
+- `frontend.mdc` → `symfony/stimulus-bundle` or `symfony/asset-mapper`
+- `twig.mdc` → `symfony/twig-bundle`
+- `i18n.mdc` → `symfony/translation`
+- `observability.mdc` → `symfony/monolog-bundle`
+- `http-client.mdc` → `symfony/http-client`
+- `caching.mdc` → `symfony/cache`
+- `workflow.mdc` → `symfony/workflow`
+- `mailer.mdc` → `symfony/mailer`
+- `serializer.mdc` → `symfony/serializer` (typically present)
+- `validator.mdc` → `symfony/validator` (typically present)
+
+### Step 3: Launch Three Explore Subagents in Parallel
+
+Launch three `mcp_task` subagents with `subagent_type: explore` in parallel. Each receives the Symfony root path.
+
+**Subagent 1 — Infrastructure audit:**
+- Config files (framework, services, routing)
+- Makefile presence and targets
+- CI configuration (GitHub Actions, GitLab CI, etc.)
+- `.env` structure and environment variables
+- Return: infrastructure fingerprint
+
+**Subagent 2 — Source code audit:**
+- Directory structure (`src/`, namespaces, bounded contexts if any)
+- Controller patterns (annotation vs attribute, HTTP layer organization)
+- Entity design (rich vs anemic, repository pattern)
+- DTO organization and mapping approach
+- Return: source architecture fingerprint
+
+**Subagent 3 — Test audit:**
+- Test framework and configuration
+- Fixture strategy (Doctrine, custom, factories)
+- Coverage tooling and thresholds
+- Test directory structure
+- Return: test architecture fingerprint
+
+### Step 4: Interactive Questioning — Rules Without Matching Dependencies
+
+For each boilerplate rule that does NOT have a matching composer dependency in the project:
+- Use the ask question tool with the exact prompt pattern
+- One question per rule, e.g.: "Messenger is not in your composer.json. Keep the messenger rule for future use?"
+- Options: keep (rule stays in index, user may add dependency later) or remove (exclude from Project DNA recommendations)
+- Record user choices for the Project DNA section
+
+### Step 5: Generate Project DNA
+
+Write the `## Project DNA` section in the project's `AGENTS.md` (or `install/AGENTS.md` if profiling the boilerplate itself). Replace the placeholder with a factual architecture fingerprint. Law 5 applies: describe what IS found, not labels.
+
+**Structure:**
+- **Symfony version:** X.Y
+- **Infrastructure:** (Makefile targets found, CI tool, config layout)
+- **Source patterns:** (controller style, entity style, repository pattern, DTO location)
+- **Test patterns:** (framework, fixtures, coverage)
+- **Applicable rules:** (list rules to keep based on Step 4 choices and composer deps)
+
+Do NOT use labels like "DDD" or "MVC" unless the code explicitly shows those patterns. Use neutral descriptions: "Entities in src/Entity with repositories in src/Repository" etc.
+
+### Step 6: Detect or Create Makefile Targets (3 targets only)
+
+**Contract:** Only three targets are required: `make quality`, `make tests`, `make ci`. All tools (PHPStan, Deptrac, PHPUnit, Infection, lint, etc.) run inside these. See `quality-pipeline.mdc` and the `quality-install` skill `templates/Makefile` for reference.
+
+**Makefile-solution:** If the project has a root Makefile that `include`s `Makefile-solution`, add or edit these three targets in **Makefile-solution** only, not in the root Makefile.
+
+Ensure the following targets exist (in the project's Makefile or in Makefile-solution if that pattern exists):
+- `make quality` — lint, Deptrac, PHPStan, CS check (all quality tools)
+- `make tests` — PHPUnit, Infection (all test tools)
+- `make ci` — full pipeline (quality + tests; optionally composer audit)
+
+**Adaptation for existing projects:** If the project already has a Makefile with different target names or tools, map them to these three (aliases are fine). If the project uses Docker, wrap commands with the project's container exec prefix. If a tool is not installed, adapt the target to only call installed tools. Do NOT write PHP, YAML, or shell code in this skill; instruct the agent to create or adapt the three targets (e.g. by copying from `quality-install` skill templates and adapting).
+
+## Exit Checklist (MANDATORY before concluding)
+
+- [ ] Symfony root detected and documented
+- [ ] composer.json read — Symfony version and components extracted
+- [ ] Three explore subagents completed (infrastructure, source, test)
+- [ ] User answered interactive questions for rules without matching composer deps
+- [ ] Project DNA written to AGENTS.md with factual fingerprint (no prescribed labels)
+- [ ] Makefile (or Makefile-solution if used) has `make quality`, `make tests`, `make ci`
+
+## On Failure
+
+- If no composer.json found: ask user for project path, retry detection
+- If explore subagent returns empty or errors: run a second pass with narrower scope, or proceed with partial data and note "partial audit" in Project DNA
+- If user declines all optional rules: respect choice, list only core rules (coding-standards, architecture, quality-pipeline) in Project DNA
+- If Makefile creation fails (e.g. no Make in PATH): document required targets for user to add manually
+- If stuck after 3 attempts: ask the user for guidance

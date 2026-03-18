@@ -1,6 +1,7 @@
 ---
-description: Symfony bundle conventions, SOLID principles, Contract pattern, final readonly architecture
+description: "Symfony bundle — AbstractBundle, Contract pattern, final readonly, config-driven services, semver public API."
 alwaysApply: true
+version: 2.0.0
 ---
 
 # Symfony Bundle Conventions
@@ -56,11 +57,11 @@ The `README.md` must always include the following badges at the top (replace `{v
 [![PHPStan Level 9](https://img.shields.io/badge/PHPStan-level%209-brightgreen.svg)](https://phpstan.org/)
 ```
 
-## Services (contexte bundle)
+## Services (bundle context)
 
-- Dans un bundle, **ne pas utiliser les attributs** pour déclarer les services (tags, listeners, composants Twig, etc.).
-- Tout enregistrement de services, tags et options doit se faire **en configuration** : dans `loadExtension()` du bundle (AbstractBundle) ou dans les fichiers XML de définition de services.
-- Exemples à éviter dans le code du bundle : `#[AsEventListener]`, `#[AsTwigComponent]`, `#[AsLiveComponent]`, tags sur les classes. À la place : appels à `$container->register()`, `->addTag()`, et déclarations explicites dans l’extension ou le XML.
+- In a bundle, **do not use PHP attributes** to register services (tags, listeners, Twig components, etc.).
+- Register services, tags, and options in **configuration**: `loadExtension()` or XML service definitions.
+- Avoid in bundle code: `#[AsEventListener]`, `#[AsTwigComponent]`, etc. Use `$container->register()`, `->addTag()`, explicit XML.
 
 ## Dependencies
 
@@ -71,80 +72,41 @@ The `README.md` must always include the following badges at the top (replace `{v
 
 ## Configurability
 
-Every feature of a bundle must be **activatable, deactivatable, and configurable** via the bundle's `configure()` tree. The host app must be able to:
+Every feature must be **activatable, deactivatable, and configurable** via `configure()`. The host app must be able to:
 
-- Enable/disable any feature (Doctrine, controllers, Twig components, listeners, etc.) via a boolean config key
-- Override Doctrine **entity classes** and **repository classes** in config — the bundle must never hardcode its own entity/repository classes in services or queries; always resolve them from configuration
-- Customize any default value (table prefix, translation domain, route prefix, etc.)
-
-Example pattern in `configure()`:
-
-```php
-->arrayNode('entity')
-    ->addDefaultsIfNotSet()
-    ->children()
-        ->scalarNode('article_class')->defaultValue(Article::class)->end()
-        ->scalarNode('article_repository_class')->defaultValue(ArticleRepository::class)->end()
-    ->end()
-->end()
-```
-
-Then in `loadExtension()`, bind these classes as parameters and inject them into services. Never use `Article::class` directly in service code — always use the configured class.
+- Enable/disable features (Doctrine, controllers, Twig components, listeners, etc.) via boolean config keys
+- Override Doctrine **entity** and **repository** classes in config — never hardcode entity classes in services; resolve from configuration
+- Customize defaults (table prefix, translation domain, route prefix, etc.)
 
 ## Translations
 
-Every user-facing string must be translated — no hardcoded text in templates, controllers, forms, validators, or flash messages.
+Every user-facing string must be translated — no hardcoded text in templates, forms, validators, or flash messages.
 
-- Extract **all** strings: Twig templates (`{% trans %}`, `|trans`), form labels/help/placeholders, constraint messages, controller flash messages, error pages, email subjects/bodies
-- XLIFF format in `translations/` at bundle root, domain `{Vendor}{Name}Bundle`
-- Always provide at least `en` and `fr` locales
-- Run `translation:extract` regularly to catch missing keys
-- Form labels: always explicit `'label' => 'form.field_name'`, never rely on auto-generated labels
-- Validator messages: always use translation keys (`'message' => 'validation.field.constraint'`)
+- XLIFF in `translations/` at bundle root, domain `{Vendor}{Name}Bundle`
+- At least `en` and `fr`; use translation keys for validators and forms
 
 ## Anti-Patterns
 
-- Using `Bundle` instead of `AbstractBundle` with separate Extension/Configuration classes
-- **Using attributes for service/tag registration in bundle code** — use config/loadExtension() instead
-- `new Configuration()` or `new Service()` — always use DI or AbstractBundle built-in methods
-- Public services by default, missing service ID prefix, YAML services
-- Setter injection, business logic in controller/entity
-- Hardcoded parameters instead of `configure()` + env vars
-- Symfony constraints `7.*|8.*` instead of `^7.0 || ^8.0`
-- Hardcoded entity/repository classes — always configurable via bundle config
-- Non-translatable user-facing strings — everything must go through the translation system
-- Features that cannot be disabled — every feature must have a config toggle
+- Using `Bundle` + separate Extension instead of `AbstractBundle`
+- **Attributes for service/tag registration in bundle code** — use config/loadExtension()
+- Public services by default, missing service ID prefix, YAML services in bundle
+- Hardcoded entity/repository classes — always configurable
+- Features that cannot be disabled via config
 
 ## Commits
 
-When committing, never reference the agent or any co-author (no Co-authored-by, Signed-off-by from the AI, or similar). Commit messages and metadata must describe only the change, with no self-attribution. Never use `git commit --trailer` or add Co-authored-by to commits.
+Never reference the agent or co-author (no Co-authored-by from AI). Commit messages describe only the change. Never use `git commit --trailer` for AI attribution.
 
 ## Cleanup — Legacy commit-msg hook
 
-If the project contains any of the following legacy artefacts, remove them:
-
-- `scripts/git-hooks/commit-msg` — delete the file (and `scripts/git-hooks/` directory if empty)
-- `install-hooks` target in the Makefile — remove the target and its `.PHONY` entry
-- Any `make install-hooks` mention in README or other documentation
-
-These artefacts are obsolete and must be cleaned up when encountered.
+Remove if present: `scripts/git-hooks/commit-msg`, `install-hooks` Makefile target, README mentions of `make install-hooks`.
 
 ## After Every Change — Makefile First
 
 Always use Makefile targets. Never call `vendor/bin/` directly.
 
-- `make cs-fix` — fix code style
-- `make phpstan` — static analysis
-- `make lint` — composer validate --strict
-- `make test` — run tests
-- `make quality` — full pipeline (cs-check + phpstan + deptrac + lint + test + infection)
-- `make ci` — security-check + quality
+- `make cs-fix`, `make phpstan`, `make lint`, `make test`, `make quality`, `make ci`
 
-## Available Skills
+## Available Skills (opt-in via composer.json)
 
-- `symfony-bundle-core`: architecture, scaffolding
-- `symfony-bundle-ux`: AssetMapper, Stimulus, Twig/Live Components
-- `symfony-bundle-doctrine`: entities, XML mapping
-- `symfony-bundle-flex`: Flex recipes
-- `symfony-bundle-quality`: Makefile, PHPStan, GrumPHP, Infection, Deptrac, CI
-
+- `feature`, `bug-fix`, `refactor`, `onboard`, `learn`, `quality-install`, `create-branch`, `commit`

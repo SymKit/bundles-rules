@@ -1,0 +1,284 @@
+---
+description: "Messenger CQRS: commands, handlers, buses, transports, stamps, idempotence, failure handling."
+alwaysApply: false
+globs: src/**/*.php,config/**/*.xml
+version: 1.7.0
+---
+
+# Symfony Messenger
+
+For entity persistence in middleware, see `doctrine.mdc`. For testing bus dispatches, see `testing.mdc`. For DTO immutability and naming conventions, see `dto.mdc`. For scheduled tasks and recurring commands, see `console-commands.mdc`.
+
+## Core Principles
+
+1. **CQRS separation** — Three explicit buses: `command.bus` (state changes, validation + doctrine_transaction), `query.bus` (reads, often sync), `event.bus` (reactions, async). Never use the default bus for everything.
+2. **One Handler per Command** — Each command has exactly one handler. No handler handles multiple command types via union types.
+3. **Immutable Command DTOs** — Commands and Events are `final readonly` data bags carrying only scalars, arrays, or UUIDs. No methods, no logic, no setters.
+4. **Pass IDs, never entities** — Never pass Doctrine entities in a message. Pass the UUID/ID. The handler fetches the fresh entity from the repository. On async, entities lose EntityManager context (LazyLoadingException) and data may have changed.
+5. **Idempotent async handlers** — "At-least-once" delivery means retries happen. Every async handler must be safe to run 2 or 10 times without side effects beyond the first run. Use unique constraints, check state before acting.
+6. **Thin handlers** — The handler orchestrates: fetches entity by ID, delegates to domain services, persists result. Business logic stays Messenger-agnostic and testable without the bus.
+7. **Middleware order matters** — `validation` → `doctrine_transaction` → `send_message`. Custom middleware goes before `send_message`.
+8. **Failure handling** — Configure `failure_transport` (dead-letter). Messages failing after retries go there. Replay via `messenger:failed:retry`.
+
+---
+
+## Conventions
+
+### Immutable Command DTOs (IDs Only)
+
+**Do:**
+
+```php
+final readonly class GenerateInvoiceCommand
+{
+    public function __construct(
+        public Uuid $orderId,
+        public Uuid $userId,
+    ) {}
+}
+```
+
+**Don't:**
+
+```php
+class GenerateInvoiceCommand
+{
+    public Order $order;  // Entity in message — serialization breaks async
+
+    public function setOrder(Order $order): void  // Mutable — race conditions
+    {
+        $this->order = $order;
+    }
+}
+```
+
+### One Handler per Command with #[AsMessageHandler]
+
+**Do:**
+
+```php
+#[AsMessageHandler(bus: 'command.bus')]
+final readonly class GenerateInvoiceHandler
+{
+    public function __construct(
+        private OrderRepository $orderRepository,
+        private InvoiceGenerator $invoiceGenerator,
+    ) {}
+
+    public function __invoke(GenerateInvoiceCommand $command): void
+    {
+        $order = $this->orderRepository->getById($command->orderId);
+        if ($order->getInvoice() !== null) {
+            return; // Idempotence: already processed
+        }
+        $this->invoiceGenerator->generateForOrder($order);
+    }
+}
+```
+
+**Don't:**
+
+```php
+final class OrderHandler  // Multiple commands — violates SRP
+{
+    public function __invoke(CreateOrderCommand|UpdateOrderCommand $cmd): void
+    {
+        if ($cmd instanceof CreateOrderCommand) { /* ... */ }
+    }
+}
+```
+
+### Three-Bus Configuration
+
+**Do:**
+
+```yaml
+framework:
+    messenger:
+        failure_transport: failed
+        transports:
+            async:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                retry_strategy:
+                    max_retries: 3
+                    delay: 1000
+                    multiplier: 2
+            failed: 'doctrine://default?queue_name=failed'
+        buses:
+            command.bus:
+                middleware:
+                    - validation
+                    - doctrine_transaction
+            query.bus:
+                default_middleware: allow_no_handlers
+            event.bus:
+                default_middleware: allow_no_handlers
+                middleware:
+                    - doctrine_clear_entity_manager
+        routing:
+            'App\Billing\Command\GenerateInvoiceCommand': async
+            'App\Notification\Message\SendWelcomeEmailMessage': async
+```
+
+**Don't:**
+
+```yaml
+messenger:
+    transports: {}  # No buses, no routing — unclear what goes where
+```
+
+### Stamps for Routing, Delay, Priority
+
+**Do:**
+
+```php
+use Symfony\Component\Messenger\Stamp\DelayStamp;
+use Symfony\Component\Messenger\Stamp\TransportNamesStamp;
+
+$this->commandBus->dispatch(new SendWelcomeEmail($userId), [
+    new DelayStamp(5000),               // 5s delay
+    new TransportNamesStamp(['async']),  // Explicit transport
+]);
+```
+
+**Don't:**
+
+```php
+$this->commandBus->dispatch(new SendWelcomeEmail($userId));
+// No stamps when delay/routing/priority is needed — silent defaults
+```
+
+### Separate Transports per Message Type
+
+**Do:**
+
+```yaml
+transports:
+    async_commands:
+        dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+        retry_strategy: { max_retries: 3, delay: 1000, multiplier: 2 }
+    async_events:
+        dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+        options: { exchange: { name: events } }
+    sync:
+        dsn: 'sync://'
+routing:
+    'App\Query\*': sync
+    'App\Command\*': async_commands
+    'App\Event\*': async_events
+```
+
+**Don't:**
+
+```yaml
+transports:
+    async:
+        dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+        # No retry_strategy — failures silently drop or retry forever
+```
+
+### Middleware Order
+
+**Do:**
+
+```yaml
+buses:
+    command.bus:
+        middleware:
+            - validation
+            - doctrine_transaction
+            - App\Infrastructure\Messenger\DoctrineClearEntityManagerMiddleware
+```
+
+**Don't:**
+
+```yaml
+middleware:
+    - send_message       # Sent before validation — invalid messages dispatched
+    - validation
+    - doctrine_transaction
+```
+
+### EntityManager Clear After Async Handler
+
+**Do:**
+
+```php
+final class DoctrineClearEntityManagerMiddleware implements MiddlewareInterface
+{
+    public function __construct(private EntityManagerInterface $em) {}
+
+    public function handle(Envelope $envelope, StackInterface $stack): Envelope
+    {
+        try {
+            return $stack->next()->handle($envelope, $stack);
+        } finally {
+            $this->em->clear();
+        }
+    }
+}
+```
+
+**Don't:**
+
+```php
+// No EntityManager::clear() — Identity Map grows, stale entities, memory leak in worker
+```
+
+### Worker Limits
+
+**Do:**
+
+```bash
+php bin/console messenger:consume async --limit=1000 --time-limit=3600 --memory-limit=128M
+```
+
+**Don't:**
+
+```bash
+php bin/console messenger:consume async  # No limits — memory leak, stale connections
+```
+
+### Idempotent Handler Pattern
+
+**Do:**
+
+```php
+public function __invoke(GenerateInvoiceCommand $command): void
+{
+    $order = $this->orderRepository->getById($command->orderId);
+    if ($order === null) {
+        return;
+    }
+    if ($order->getInvoice() !== null) {
+        return; // Already processed — safe for retries
+    }
+    $this->invoiceGenerator->generateForOrder($order);
+}
+```
+
+**Don't:**
+
+```php
+public function __invoke(GenerateInvoiceCommand $command): void
+{
+    $order = $this->orderRepository->getById($command->orderId);
+    $this->invoiceGenerator->generateForOrder($order); // Creates duplicate on retry
+}
+```
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| Mutable command properties | `final readonly` with promoted props. All data in constructor |
+| Entity passed in message | Pass scalar IDs/UUID only. Handler fetches fresh entity |
+| Handler not executed | Check: `#[AsMessageHandler]`, `bus:` param, `__invoke` type-hint, autoconfigure |
+| Missing `failure_transport` | Always configure `failure_transport: failed`. Replay via `messenger:failed:retry` |
+| Single handler for multiple commands | One handler per command. Name: `{CommandName}Handler` |
+| Non-idempotent async handler | Check state before acting. Unique constraints. Design for at-least-once |
+| Wrong middleware order | `validation` → `doctrine_transaction` → custom → `send_message` |
+| No worker limits | Always set `--limit`, `--time-limit`, `--memory-limit` |
+| No EntityManager clear in worker | Register `DoctrineClearEntityManagerMiddleware` on async buses |

@@ -1,0 +1,269 @@
+---
+description: "DTOs: immutability, context-based naming, validation at boundary, mapping, no public setters."
+alwaysApply: false
+globs: src/**/*.php
+version: 1.7.0
+---
+
+# DTOs (Data Transfer Objects)
+
+For API usage (`#[MapRequestPayload]`), see `api.mdc` and `api-platform.mdc`. For form binding, see `forms.mdc`.
+
+## Core Principles
+
+1. **Never bind entities to external input** — Entities enforce invariants (see `doctrine.mdc`). DTOs represent the shape of external data (request body, query string, form submission). Mixing them leaks persistence schema and causes mass-assignment vulnerabilities.
+2. **Immutable by default** — `readonly` properties via constructor promotion. DTO state is set once and never mutated.
+3. **Validate at the boundary** — `#[Assert\...]` on DTO properties. Fail fast before any business logic or persistence. Never validate on Doctrine entities.
+4. **One DTO per use case** — `CreateOrderInput` and `UpdateOrderInput` are separate classes, even if fields overlap. Avoids optional-field hell and unclear intent.
+5. **Naming convention per context** — See naming table below. Consistent naming signals where and how the DTO is used.
+6. **DTO is not the entity** — Mapping DTO → Entity happens in a Handler, Processor, or dedicated Mapper. Never in controllers.
+7. **Cascade validation with `#[Valid]`** — Nested DTOs (e.g. `AddressInput` inside `CreateUserInput`) require `#[Assert\Valid]` on the property to trigger sub-object validation.
+8. **No business logic in DTOs** — DTOs are data bags. No computation, no side effects, no service calls.
+
+---
+
+## Naming Conventions
+
+| Context | Input DTO | Output DTO | Query DTO | Example |
+|---------|-----------|------------|-----------|---------|
+| **API Platform** | `CreateXxxInput` | `XxxResource` | N/A (filters) | `CreateOrderInput`, `OrderResource` |
+| **API native (MapRequestPayload)** | `CreateXxxPayload` / `UpdateXxxPayload` | `XxxResponse` | `XxxFilter` | `CreateUserPayload`, `UserResponse` |
+| **Forms (Twig/UI)** | `XxxFormData` | N/A | N/A | `CreateArticleFormData` |
+| **CQRS Command** | `CreateXxxCommand` | N/A | `GetXxxQuery` | `CreateOrderCommand`, `GetOrderQuery` |
+| **MapQueryString** | N/A | N/A | `XxxFilter` / `XxxCriteria` | `ProductFilter`, `SearchCriteria` |
+| **MapQueryParameter** | N/A | N/A | scalar typed param | `#[MapQueryParameter] int $page` |
+
+> **Rule of thumb:** If the DTO crosses a boundary (HTTP, bus, external service), it deserves its own class with a clear name signaling direction (input/output) and context.
+
+---
+
+## Conventions
+
+### Immutable DTO with Validation
+
+**Do:**
+
+```php
+final readonly class CreateUserPayload
+{
+    public function __construct(
+        #[Assert\NotBlank]
+        #[Assert\Email]
+        public string $email,
+
+        #[Assert\NotBlank]
+        #[Assert\Length(min: 8, max: 72)]
+        public string $password,
+    ) {}
+}
+```
+
+**Don't:**
+
+```php
+class CreateUserDto
+{
+    public string $email;   // Mutable — can be changed after creation
+    public string $password; // No validation — garbage in, garbage out
+}
+```
+
+### One DTO per Use Case
+
+**Do:**
+
+```php
+final readonly class CreateOrderInput
+{
+    public function __construct(
+        #[Assert\NotBlank]
+        public string $customerId,
+        #[Assert\Count(min: 1)]
+        public array $lines,
+    ) {}
+}
+
+final readonly class UpdateOrderInput
+{
+    public function __construct(
+        #[Assert\Choice(choices: ['confirmed', 'cancelled'])]
+        public string $status,
+        public ?string $notes = null,
+    ) {}
+}
+```
+
+**Don't:**
+
+```php
+final readonly class OrderDto
+{
+    public function __construct(
+        public ?string $customerId = null,  // Required for create, ignored for update
+        public ?array $lines = null,         // Nullable = unclear intent
+        public ?string $status = null,       // All fields optional = no contract
+    ) {}
+}
+```
+
+### Cascade Validation on Nested DTOs
+
+**Do:**
+
+```php
+final readonly class CreateUserPayload
+{
+    public function __construct(
+        #[Assert\NotBlank]
+        public string $name,
+
+        #[Assert\Valid]
+        public AddressPayload $address,
+    ) {}
+}
+
+final readonly class AddressPayload
+{
+    public function __construct(
+        #[Assert\NotBlank]
+        public string $street,
+        #[Assert\NotBlank]
+        #[Assert\Length(exactly: 5)]
+        public string $zipCode,
+    ) {}
+}
+```
+
+**Don't:**
+
+```php
+// Missing #[Assert\Valid] — AddressPayload constraints silently ignored
+public AddressPayload $address;
+```
+
+### Query Filter DTO (MapQueryString)
+
+**Do:**
+
+```php
+final readonly class ProductFilter
+{
+    public function __construct(
+        #[Assert\Positive]
+        public int $page = 1,
+
+        #[Assert\Range(min: 1, max: 100)]
+        public int $limit = 20,
+
+        #[Assert\Length(max: 255)]
+        public ?string $search = null,
+
+        #[Assert\Choice(choices: ['price', 'name', 'created_at'])]
+        public string $sortBy = 'created_at',
+
+        #[Assert\Choice(choices: ['asc', 'desc'])]
+        public string $sortOrder = 'desc',
+    ) {}
+}
+```
+
+```php
+#[Route('/api/products', methods: ['GET'])]
+public function list(#[MapQueryString] ProductFilter $filter): JsonResponse
+{
+    $products = $this->repository->findByFilter($filter);
+    return $this->json($products);
+}
+```
+
+**Don't:**
+
+```php
+public function list(Request $request): JsonResponse
+{
+    $page = (int) $request->query->get('page', 1);   // No validation
+    $limit = (int) $request->query->get('limit', 20); // No constraint
+    $sort = $request->query->get('sort');               // Injection risk
+}
+```
+
+### DTO to Entity Mapping in Handler
+
+**Do:**
+
+```php
+final readonly class CreateOrderHandler
+{
+    public function __construct(
+        private OrderRepositoryInterface $repository,
+    ) {}
+
+    public function __invoke(CreateOrderCommand $command): void
+    {
+        $order = Order::create(
+            customerId: new CustomerId($command->customerId),
+            lines: $command->lines,
+        );
+        $this->repository->save($order);
+    }
+}
+```
+
+**Don't:**
+
+```php
+// In controller — business logic leak
+$order = new Order();
+$order->setCustomerId($dto->customerId);
+$order->setLines($dto->lines);
+$this->em->persist($order);
+$this->em->flush();
+```
+
+### Form-Specific DTO (Twig/UI Context)
+
+**Do:**
+
+```php
+final class CreateArticleFormData
+{
+    public function __construct(
+        #[Assert\NotBlank]
+        #[Assert\Length(min: 3, max: 255)]
+        public string $title = '',
+
+        #[Assert\NotBlank]
+        public string $content = '',
+
+        #[Assert\Choice(choices: ['draft', 'published'])]
+        public string $status = 'draft',
+    ) {}
+    // Not readonly — forms need setters for hydration via handleRequest()
+}
+```
+
+> **Note:** Form DTOs are NOT readonly because Symfony Forms hydrate them via property access. Use default values for the initial empty form state.
+
+**Don't:**
+
+```php
+$form = $this->createForm(ArticleType::class, $articleEntity);
+// Entity bound to form — validation and persistence concerns mixed
+```
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| Entity as form `data_class` | Bind forms to DTOs. Map to entity in handler |
+| Same DTO for create and update | One DTO per use case. Different fields = different class |
+| Missing `#[Assert\Valid]` on nested DTO | Always cascade. Sub-object constraints silently skipped without it |
+| `$request->get()` without DTO | Use `#[MapRequestPayload]`, `#[MapQueryString]`, or Forms. Never raw access |
+| Mutable DTO with public setters | `readonly` properties. Set once in constructor |
+| Business logic in DTO | DTOs are data bags. Logic goes in Handlers/Services |
+| DTO mapping in controller | Map in Handler, Processor, or dedicated Mapper class |
+| Validation on Doctrine entity | `#[Assert\...]` on DTOs only. Entities use domain logic + Value Objects |
+| Form DTO marked `readonly` | Forms need property write access. Use non-readonly with defaults |
+| Generic naming (`UserDto`) | Context-specific: `CreateUserPayload`, `UserFormData`, `UserFilter` |

@@ -1,0 +1,117 @@
+---
+name: create-branch
+description: "Create a Git branch with type prefix and kebab-case slug. Use when the user asks to create a branch, start new work, or when /commit detects work on main/master."
+version: 1.7.0
+---
+
+# Create Branch
+
+## When to Use
+
+- User asks to create, start, or switch to a new branch
+- `/commit` detected work on `main`/`master` and redirected here
+- Starting new work that needs isolation
+
+## When NOT to Use
+
+- Already on a feature branch — use `/commit` instead
+- Exploring or reading code — no branch needed
+
+## Instructions
+
+### Step 1: Understand the Work
+
+If the user described the work, use that as the starting point.
+
+If no description provided, check for local changes:
+
+```bash
+git diff --stat
+git diff --cached --stat
+git status --short
+```
+
+- **Changes exist**: read the diff to infer what the work is about and generate a description.
+- **No changes**: use the ask question tool — "What are you about to work on?" and "Is this a feature, bug fix, refactor, or something else?"
+
+### Step 2: Classify the Branch Type
+
+| Type       | When                                          |
+|------------|-----------------------------------------------|
+| `feat`     | New user-facing functionality                 |
+| `fix`      | Broken behavior that needs correction         |
+| `refactor` | Same behavior, different structure            |
+| `chore`    | Dependencies, config, maintenance             |
+| `perf`     | Same behavior, faster                         |
+| `docs`     | Documentation only                            |
+| `test`     | Tests only                                    |
+| `ci`       | CI/CD configuration                           |
+| `style`    | Formatting, code style — no logic change      |
+
+When unsure, challenge the user: "This sounds like it could be `feat` or `refactor` — which describes the intent better?"
+
+### Step 3: Propose the Branch Name
+
+Build as `<type>/<short-kebab-description>`:
+- 3–6 words, kebab-case, lowercase ASCII + hyphens only
+- Describe the change, not file names
+- No spaces, dots, colons, or git-forbidden characters
+
+Examples:
+
+| Work description                           | Branch name                          |
+|--------------------------------------------|--------------------------------------|
+| Adding search to conversations page        | `feat/add-search-to-conversations`   |
+| Dropdown not closing on outside click      | `fix/dropdown-not-closing-on-blur`   |
+| Restructuring drawer components            | `refactor/simplify-drawer-components`|
+| Adding a CSV export endpoint               | `feat/add-csv-export-endpoint`       |
+
+If the upcoming work involves specific Symfony components, mention which `.cursor/rules/*.mdc` rules will be relevant — this helps plan scope.
+
+**Present the name to the user and wait for confirmation.** Adapt if they request changes.
+
+### Step 4: Detect Base and Prepare
+
+Detect current and default branches:
+
+```bash
+git branch --show-current
+git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||'
+```
+
+If `symbolic-ref` fails, fall back to `git branch --list main master` — use whichever exists. If both or neither, ask the user.
+
+**Detached HEAD** (empty `git branch --show-current`): show the current commit (`git rev-parse --short HEAD`) and ask whether to branch from it or switch to the default branch first.
+
+**Not on default branch**: warn the user and ask whether to branch from the current branch or switch to the default branch first.
+
+**Dirty working tree**: offer to stash (`git stash push -m "create-branch: auto-stash"`). On any failure, restore stash and stop.
+
+### Step 5: Create
+
+Verify the name is available locally and remotely:
+
+```bash
+git show-ref --verify --quiet refs/heads/<name> && echo "exists-local"
+git show-ref --verify --quiet refs/remotes/origin/<name> && echo "exists-remote"
+```
+
+If taken, propose an alternative. Then create:
+
+```bash
+git checkout -b <name>
+```
+
+Restore any stashed changes. Confirm with `git branch --show-current`.
+
+## Exit Checklist
+
+- [ ] Branch name proposed and confirmed by user
+- [ ] Branch created and checked out (`git branch --show-current`)
+- [ ] No uncommitted changes lost (stashed and restored if needed)
+
+## On Failure
+
+- Branch already exists: propose alternative with different wording or suffix
+- Stash restore fails: alert user and show `git stash list`
+- Stuck after 3 attempts: ask the user for guidance

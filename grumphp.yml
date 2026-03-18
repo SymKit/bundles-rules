@@ -9,8 +9,11 @@ grumphp:
         phpunit:
             config_file: phpunit.xml.dist
             always_execute: true
+        # In-process deptrac task conflicts with deptrac/deptrac nested vendor (ComposerAutoloaderInit duplicate). Run via make subprocess.
         deptrac:
-            depfile: deptrac.yaml
+            metadata:
+                task: make
+            task: deptrac
         infection:
             configuration: infection.json5
             min_msi: 70

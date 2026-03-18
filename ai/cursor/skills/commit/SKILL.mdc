@@ -1,0 +1,146 @@
+---
+name: commit
+description: "Validate quality, commit, and push changes following Conventional Commits. Use when the user wants to commit, push, finalize work, or says 'commit', 'push', 'save my changes'."
+version: 2.0.0
+---
+
+# Commit
+
+## When to Use
+
+- User wants to commit and/or push changes
+- Finalizing a feature, fix, or refactor
+- User says "commit", "push", "save changes", or similar
+
+## When NOT to Use
+
+- No changes to commit (empty working tree)
+- User just wants to see the diff
+
+## Prohibited
+
+- DO NOT commit on `main` or `master` — invoke `/create-branch` first.
+- DO NOT force push (`--force`) without explicit user confirmation.
+- DO NOT commit messages in a language other than English.
+- DO NOT commit sensitive files (`.env`, `.env.local`, credentials, secrets, API keys, tokens) without alerting the user.
+- DO NOT omit the type prefix (Conventional Commits).
+
+## Instructions
+
+### Step 1: Branch Protection (MANDATORY)
+
+```bash
+git branch --show-current
+```
+
+If on `main` or `master`: invoke `/create-branch`. After it completes, verify the branch changed. If still on `main`/`master` (user aborted), **STOP**.
+
+### Step 2: Review Changes
+
+Run `git status` and `git diff --stat`. Use the ask question tool to challenge:
+- "These changes touch [N] files. Should this be one commit or split into smaller logical units?"
+- "I see changes to [sensitive area]. Was this intentional?"
+
+**Security check**: scan staged files for patterns: `.env`, `credentials`, `secret`, `token`, `password`, `apikey`, `private_key`. If found, alert the user immediately and `git reset HEAD <file>`.
+
+### Step 3: Quality Gate
+
+Run `make ci` to verify the full CI pipeline (security-check + quality + tests). Conventions are defined in `.cursor/rules/quality-pipeline.mdc`.
+
+If `make ci` does not exist, warn the user and suggest `/quality-install`.
+
+If `make ci` fails: analyze error, fix, retry (max 3 attempts). If still failing, ask user.
+
+### Step 4: Build the Commit Message
+
+**Header** (required): `<type>(<scope>): <subject>`
+
+| Type       | When                                          |
+|------------|-----------------------------------------------|
+| `feat`     | New feature                                   |
+| `fix`      | Bug fix                                       |
+| `refactor` | Refactoring (no behavior change)              |
+| `perf`     | Performance improvement                       |
+| `docs`     | Documentation only                            |
+| `test`     | Test additions or corrections                 |
+| `build`    | Build system or dependencies                  |
+| `ci`       | CI configuration                              |
+| `chore`    | Maintenance tasks                             |
+| `style`    | Code formatting (no logic change)             |
+
+Subject rules: imperative present tense ("Add feature" not "Added"), capitalize first letter, no period, max 70 chars. Scope is optional.
+
+**Body** (recommended for non-trivial changes): explain **what** and **why**, not how. Use imperative mood. Contrast with previous behavior when relevant.
+
+**Footer** (optional):
+- `Fixes #NNN` — closes the issue when merged
+- `Refs #NNN` — links without closing
+- `BREAKING CHANGE: <description>` — add `!` after type/scope in header too
+
+If the user provided intent in another language, translate to English.
+
+**Examples:**
+
+Simple fix:
+```
+fix(api): Handle null response in user endpoint
+```
+
+Feature with body:
+```
+feat(alerts): Add Slack thread replies for alert updates
+
+Post replies to the original Slack thread instead of creating new
+messages. Keeps related notifications grouped.
+
+Refs #1234
+```
+
+Breaking change:
+```
+feat(api)!: Remove deprecated v1 endpoints
+
+BREAKING CHANGE: v1 endpoints no longer available
+Fixes #9999
+```
+
+### Step 5: Commit and Push
+
+1. Stage relevant files (`git add .` if user confirms, or selective add)
+2. Commit with the message (use HEREDOC for multi-line)
+3. Push — `git push -u origin HEAD` if no upstream
+
+Confirm success: show commit hash and remote status.
+
+## Troubleshooting
+
+**`make ci` fails (PHPStan):** fix the type issue. Never add to baseline — fix all errors.
+
+**`make ci` fails (CS-Fixer):** fix code style (e.g. run the project's formatter if available), then re-stage.
+
+**`make ci` fails (Deptrac):** dependency crosses architectural layer. Refactor or document exception.
+
+**Push rejected (non-fast-forward):** run `git pull --rebase origin <branch>`, resolve conflicts if any, then push again.
+
+**Sensitive file staged:** `git reset HEAD <file>`, add to `.gitignore` if it should never be committed.
+
+## Principles
+
+- Each commit is a single, stable, independently reviewable change
+- The repository is in a working state after each commit
+- Quality gate passed before every commit
+
+## Exit Checklist
+
+- [ ] Branch is NOT `main`/`master`
+- [ ] `make ci` passed (or user warned if unavailable)
+- [ ] No sensitive files committed
+- [ ] Commit message follows Conventional Commits (English, imperative)
+- [ ] Changes pushed to remote
+
+## On Failure
+
+- `make ci` fails: fix and retry, max 3 attempts then ask user
+- Push rejected (non-fast-forward): pull with rebase then push
+- Push fails (no upstream): `git push -u origin HEAD`
+- Stuck after 3 attempts: ask the user for guidance

@@ -1,0 +1,264 @@
+---
+description: "Validator: constraints, groups, sequences, CompoundConstraint, ConstraintValidator, tests."
+alwaysApply: false
+globs: src/**/*.php
+version: 1.7.0
+---
+
+# Validator
+
+For validation at DTO boundaries, see `dto.mdc`. For form validation, see `forms.mdc`. For API input validation, see `api.mdc`.
+
+## Core Principles
+
+1. **Validate at boundaries only** — Validate incoming DTOs, never entities. Entities enforce invariants via constructor and methods. DTOs enforce input shape via constraints. See `dto.mdc`.
+2. **Attribute constraints on DTOs** — Use `#[Assert\...]` attributes on DTO properties. Never validate via procedural `$validator->validate()` calls in controllers (MapRequestPayload handles this).
+3. **Validation groups for context** — Use groups (`#[Assert\NotBlank(groups: ['create'])]`) when the same DTO serves multiple operations. Default group applies when no group is specified.
+4. **GroupSequence for ordered validation** — When expensive validations depend on cheap ones passing first (e.g., format check before uniqueness), use `#[GroupSequence]`.
+5. **CompoundConstraint for reusable bundles** — Combine repeated constraint sets into a `CompoundConstraint` class. One attribute replaces five.
+6. **Custom ConstraintValidator for domain rules** — Business validation that needs services (repository lookups, API calls) goes in a custom `ConstraintValidator`, not inline in handlers.
+7. **Typed error responses** — Validation failures produce RFC 7807 Problem Details via the framework. See `error-handling.mdc`. Never catch `ValidationFailedException` to build custom error shapes.
+8. **Test constraints in isolation** — Unit-test custom `ConstraintValidator` classes with `ValidatorBuilder`. Never rely on functional tests alone for constraint logic.
+
+---
+
+## Conventions
+
+### Attribute Constraints on DTOs
+
+**Do:**
+
+```php
+use Symfony\Component\Validator\Constraints as Assert;
+
+final readonly class CreateProductCommand
+{
+    public function __construct(
+        #[Assert\NotBlank]
+        #[Assert\Length(min: 3, max: 255)]
+        public string $name,
+
+        #[Assert\Positive]
+        public int $price,
+
+        #[Assert\NotBlank]
+        #[Assert\Uuid]
+        public string $categoryId,
+    ) {}
+}
+```
+
+**Don't:**
+
+```php
+// Procedural validation in controller — duplicated, not reusable
+public function create(Request $request): Response
+{
+    $data = json_decode($request->getContent(), true);
+    if (empty($data['name'])) {
+        return new JsonResponse(['error' => 'Name required'], 400);
+    }
+}
+```
+
+### Validation Groups
+
+**Do:**
+
+```php
+final readonly class UserDto
+{
+    public function __construct(
+        #[Assert\NotBlank(groups: ['create', 'update'])]
+        #[Assert\Email(groups: ['create', 'update'])]
+        public string $email,
+
+        #[Assert\NotBlank(groups: ['create'])]
+        #[Assert\Length(min: 8, groups: ['create'])]
+        public ?string $password = null,
+    ) {}
+}
+```
+
+```php
+#[Route('/users', methods: ['POST'])]
+public function create(
+    #[MapRequestPayload(validationGroups: ['create'])] UserDto $dto,
+): Response { /* ... */ }
+```
+
+**Don't:**
+
+```php
+// Separate DTOs for create/update with 90% duplication
+final readonly class CreateUserDto { /* ... */ }
+final readonly class UpdateUserDto { /* ... same fields minus password */ }
+```
+
+### GroupSequence for Ordered Validation
+
+**Do:**
+
+```php
+use Symfony\Component\Validator\Constraints as Assert;
+
+#[Assert\GroupSequence(['Default', 'Expensive'])]
+final readonly class ImportRowDto
+{
+    public function __construct(
+        #[Assert\NotBlank]
+        #[Assert\Regex(pattern: '/^\d{13}$/')]
+        public string $ean,
+
+        #[Assert\NotBlank(groups: ['Expensive'])]
+        #[UniqueEan(groups: ['Expensive'])]
+        public string $eanForUniqueness,
+    ) {}
+}
+```
+
+**Don't:**
+
+```php
+// Uniqueness check runs even when format is invalid — wasted DB query
+#[Assert\NotBlank]
+#[UniqueEan]
+public string $ean;
+```
+
+### CompoundConstraint for Reusable Bundles
+
+**Do:**
+
+```php
+#[\Attribute]
+final class PasswordStrength extends Compound
+{
+    protected function getConstraints(array $options): array
+    {
+        return [
+            new Assert\NotBlank(),
+            new Assert\Length(min: 8, max: 4096),
+            new Assert\NotCompromisedPassword(),
+            new Assert\PasswordStrength(minScore: 3),
+        ];
+    }
+}
+```
+
+```php
+final readonly class RegisterCommand
+{
+    public function __construct(
+        #[PasswordStrength]
+        public string $password,
+    ) {}
+}
+```
+
+**Don't:**
+
+```php
+// Same 4 constraints repeated on every password field across 5 DTOs
+#[Assert\NotBlank]
+#[Assert\Length(min: 8, max: 4096)]
+#[Assert\NotCompromisedPassword]
+#[Assert\PasswordStrength(minScore: 3)]
+public string $password;
+```
+
+### Custom ConstraintValidator with Service Injection
+
+**Do:**
+
+```php
+#[\Attribute]
+final class UniqueEmail extends Constraint
+{
+    public string $message = 'Email "{{ value }}" is already registered.';
+}
+
+final class UniqueEmailValidator extends ConstraintValidator
+{
+    public function __construct(private UserRepository $userRepository) {}
+
+    public function validate(mixed $value, Constraint $constraint): void
+    {
+        assert($constraint instanceof UniqueEmail);
+        if ($value === null || $value === '') {
+            return;
+        }
+        if ($this->userRepository->findByEmail($value) !== null) {
+            $this->context->buildViolation($constraint->message)
+                ->setParameter('{{ value }}', $value)
+                ->addViolation();
+        }
+    }
+}
+```
+
+**Don't:**
+
+```php
+// Validation logic in the handler — not reusable, not declarative
+public function __invoke(RegisterCommand $cmd): void
+{
+    if ($this->userRepo->findByEmail($cmd->email)) {
+        throw new \DomainException('Email taken');
+    }
+}
+```
+
+### Testing Custom Validators
+
+**Do:**
+
+```php
+final class UniqueEmailValidatorTest extends ConstraintValidatorTestCase
+{
+    private UserRepository&MockObject $userRepository;
+
+    protected function createValidator(): UniqueEmailValidator
+    {
+        $this->userRepository = $this->createMock(UserRepository::class);
+        return new UniqueEmailValidator($this->userRepository);
+    }
+
+    public function testExistingEmailRaisesViolation(): void
+    {
+        $this->userRepository->method('findByEmail')->willReturn(new User());
+        $this->validator->validate('taken@example.com', new UniqueEmail());
+        $this->buildViolation('Email "{{ value }}" is already registered.')
+            ->setParameter('{{ value }}', 'taken@example.com')
+            ->assertRaised();
+    }
+
+    public function testNewEmailPasses(): void
+    {
+        $this->userRepository->method('findByEmail')->willReturn(null);
+        $this->validator->validate('new@example.com', new UniqueEmail());
+        $this->assertNoViolation();
+    }
+}
+```
+
+**Don't:**
+
+```php
+// Only testing via functional/HTTP tests — slow, indirect, misses edge cases
+```
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| Validating entities instead of DTOs | Constraints on DTO properties only. Entities use constructor invariants |
+| Procedural validation in controllers | Use `#[Assert\...]` attributes + `MapRequestPayload`. Framework handles errors |
+| No validation groups on shared DTOs | Add groups when one DTO serves create + update. Default group catches ungrouped |
+| Expensive validation runs on invalid input | `#[GroupSequence]` — cheap checks first, expensive checks in later group |
+| Repeated constraint sets across DTOs | Extract into `CompoundConstraint` subclass. One attribute replaces many |
+| Business rules in handler instead of validator | Custom `ConstraintValidator` with injected services. Declarative, reusable |
+| Catching `ValidationFailedException` manually | Let the framework produce RFC 7807 responses. See `error-handling.mdc` |
+| No unit tests for custom validators | Use `ConstraintValidatorTestCase` for isolated, fast constraint testing |

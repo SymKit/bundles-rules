@@ -4,11 +4,11 @@
 [![Latest Version](https://img.shields.io/packagist/v/symkit/bundle-ai-kit.svg)](https://packagist.org/packages/symkit/bundle-ai-kit)
 [![PHPStan Level 9](https://img.shields.io/badge/PHPStan-level%209-brightgreen.svg)](https://phpstan.org/)
 
-AI rules and optional skills for building Symfony bundles with best practices: SOLID, AbstractBundle, Contract pattern, and quality tooling (PHPStan 9, GrumPHP, Infection, Deptrac, CI).
+AI rules, **AGENTS.md**, agent prompts, and optional skills for **Symfony bundle** packages: AbstractBundle, Contract pattern, SOLID, Symfony ecosystem topics (API, Doctrine, Messenger, UX, etc.), and quality tooling (PHPStan 9, GrumPHP, Infection, Deptrac).
 
 Supports **Cursor**, **Claude Code**, **Windsurf**, and **Google Antigravity** from a single source of truth.
 
-**By default** the Composer plugin installs **all 7 rules** for **Cursor** into your project and **no skills**. You can enable additional editors and specific skills via `composer.json` (see [Configuration](#configuration)). User-added files are never removed; the plugin only merges or overwrites its own files.
+**By default** the plugin installs **all rules**, **`AGENTS.md`** at the project root, **agent files** under each editor’s `agents/` directory, for **Cursor** only — and **no skills**. Enable more editors and skills via `composer.json`. User-added files are never removed; the plugin merges and overwrites kit files only.
 
 ## Requirements
 
@@ -16,12 +16,14 @@ Supports **Cursor**, **Claude Code**, **Windsurf**, and **Google Antigravity** f
 - Composer 2.x or 3.x
 - At least one supported AI editor:
 
-| Editor | Rules location | Skills location |
-|--------|---------------|-----------------|
-| [Cursor](https://cursor.com/) | `.cursor/rules/*.mdc` | `.cursor/skills/` |
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `.claude/rules/*.md` | `.claude/rules/skills/` |
-| [Windsurf](https://windsurf.com/) | `.windsurf/rules/*.md` | `.windsurf/rules/skills/` |
-| [Google Antigravity](https://antigravity.google/) | `.agent/rules/*.md` | `.agent/rules/skills/` |
+| Editor | Rules | Skills | Agents |
+|--------|-------|--------|--------|
+| [Cursor](https://cursor.com/) | `.cursor/rules/*.mdc` | `.cursor/skills/{name}/` | `.cursor/agents/*.md` |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `.claude/rules/*.md` | `.claude/rules/skills/{name}/` | `.claude/agents/*.md` |
+| [Windsurf](https://windsurf.com/) | `.windsurf/rules/*.md` | `.windsurf/rules/skills/{name}/` | `.windsurf/agents/*.md` |
+| [Google Antigravity](https://antigravity.google/) | `.agent/rules/*.md` | `.agent/rules/skills/{name}/` | `.agent/agents/*.md` |
+
+**Project root:** `AGENTS.md` (same file for every editor sync).
 
 ## Installation
 
@@ -69,15 +71,15 @@ Then run:
 composer update symkit/bundle-ai-kit
 ```
 
-On every `composer install` or `composer update`, the plugin syncs the kit's rules (and any enabled skills) into the appropriate directories for each configured editor.
+On every `composer install` or `composer update`, the plugin syncs rules, `AGENTS.md`, agents (per editor), and any enabled skills.
 
 ## Configuration
 
-Configuration is optional and lives under `extra.bundle-ai-kit` in your bundle's `composer.json`.
+Configuration is optional and lives under `extra.bundle-ai-kit` in your bundle’s `composer.json`.
 
 ### Choosing editors
 
-By default only **Cursor** is enabled. To add other editors, set the `editors` array:
+By default only **Cursor** is enabled. To add other editors:
 
 ```json
 {
@@ -91,18 +93,16 @@ By default only **Cursor** is enabled. To add other editors, set the `editors` a
 
 Valid values: `"cursor"`, `"claude"`, `"windsurf"`, `"antigravity"`.
 
-The plugin reads rules from a single source (`ai/cursor/`) and converts the frontmatter format automatically for each target editor:
+The plugin reads from:
 
-- **Cursor** — copies `.mdc` files as-is
-- **Claude Code** — converts to `.md` with `globs:` frontmatter for path-scoped rules
-- **Windsurf** — converts to `.md` with no frontmatter (plain markdown)
-- **Google Antigravity** — converts to `.md` with no frontmatter (activation modes are configured via the IDE UI)
+- `ai/cursor/rules/*.mdc` → rules (converted to `.md` for non-Cursor editors where applicable)
+- `ai/AGENTS.md` → project root `AGENTS.md`
+- `ai/cursor/agents/*.md` → each editor’s `agents/` directory (copied as-is)
+- `ai/cursor/skills/{name}/` → optional skills (`SKILL.mdc` + templates)
 
 ### Enabling skills
 
-By default **no skills** are installed. To enable specific skills, set the `skills` array:
-
-**Enable all skills** (most common):
+By default **no skills** are installed. Example — **all skills**:
 
 ```json
 {
@@ -110,88 +110,76 @@ By default **no skills** are installed. To enable specific skills, set the `skil
         "bundle-ai-kit": {
             "editors": ["cursor", "claude", "windsurf", "antigravity"],
             "skills": [
-                "symfony-bundle-core",
-                "symfony-bundle-ux",
-                "symfony-bundle-doctrine",
-                "symfony-bundle-flex",
-                "symfony-bundle-quality"
+                "feature",
+                "bug-fix",
+                "refactor",
+                "onboard",
+                "learn",
+                "quality-install",
+                "create-branch",
+                "commit"
             ]
         }
     }
 }
 ```
 
-To enable only some skills, use a subset (e.g. `["symfony-bundle-core", "symfony-bundle-ux"]`).
-
-Available skills:
-
 | Skill | Description |
 |-------|-------------|
-| `symfony-bundle-core` | Architecture, scaffolding, SOLID, Contract pattern, compiler passes, events |
-| `symfony-bundle-ux` | AssetMapper, Stimulus, Twig/Live Components |
-| `symfony-bundle-doctrine` | Entities, XML mapping, UUID v7, typed collections |
-| `symfony-bundle-flex` | Flex recipes, `manifest.json` |
-| `symfony-bundle-quality` | Makefile, PHPStan 9, GrumPHP, Infection, Deptrac, CI |
-
-Skills are installed into the editor-specific skills directory (e.g. `.cursor/skills/`, `.claude/rules/skills/`, `.windsurf/rules/skills/`, `.agent/rules/skills/`).
+| `feature` | PM → Architect → implementation → QA pipeline |
+| `bug-fix` | TDD: regression test first, then fix |
+| `refactor` | Safe refactor with coverage first |
+| `onboard` | Profile bundle repo, update Project DNA in `AGENTS.md` |
+| `learn` | Capture lessons to `docs/lessons-learned.md` |
+| `quality-install` | PHPStan, CS-Fixer, Deptrac, Infection, GrumPHP, Makefile templates |
+| `create-branch` | Branch naming `type/slug` |
+| `commit` | Validate, commit, push (Conventional Commits) |
 
 ## What you get
 
 ### Rules (always installed)
 
-All 7 rules are merged into the rules directory of each configured editor. The plugin never deletes files you added yourself.
+24 `.mdc` rules. **`symfony-bundle`** is `alwaysApply`; the others mostly use `globs` (`src/**/*.php`, `templates/**/*.twig`, `config/**/*.xml`, Makefile/CI, etc.).
 
-| Rule | Scope | When it applies |
-|------|--------|------------------|
-| `symfony-bundle` | Always | Every interaction — SOLID, AbstractBundle, Contract pattern |
-| `php-bundle-code` | `src/**/*.php` | Editing PHP source |
-| `xml-config` | `config/**/*.xml` | Editing XML (services, Doctrine) |
-| `bundle-tests` | `tests/**/*.php` | Editing tests |
-| `bundle-ux` | `assets/**/*.js`, `*.ts` | Editing JS/TS assets |
-| `twig-bundle` | `templates/**/*.twig` | Editing Twig templates |
-| `bundle-quality` | Makefile, CI configs | Editing quality/CI files |
+| Rule | Topic |
+|------|--------|
+| `symfony-bundle` | AbstractBundle, Contract, config-driven services, translations, semver (always) |
+| `architecture` | Bundle layers, Extension, tests, Flex |
+| `coding-standards`, `dto`, `testing`, `quality-pipeline` | Core PHP / tests / Makefile |
+| `api`, `api-platform`, `security`, `serializer`, `error-handling` | HTTP & API surface when the bundle exposes it |
+| `doctrine`, `forms`, `validator`, `messenger`, `workflow` | Optional bundle features |
+| `twig`, `frontend`, `i18n` | Templates & assets |
+| `caching`, `http-client`, `mailer`, `console-commands`, `observability` | Infra & ops |
+
+### AGENTS.md + agents
+
+- **`AGENTS.md`** — behavioural directives and a rules index (Project DNA filled by `/onboard`).
+- **`pm`**, **`architect`**, **`qa`** — Markdown agent definitions under each editor’s `agents/` folder (for subagent workflows, e.g. `/feature`).
 
 ### Skills (opt-in)
 
-Skills are only installed when listed in `extra.bundle-ai-kit.skills`. They provide deeper guidance for specific tasks (e.g. "create a bundle", "add a Stimulus controller", "set up Flex recipe").
+Installed only when listed in `extra.bundle-ai-kit.skills`.
 
 ### Merge-only behaviour
 
-The plugin only copies or overwrites files that exist in the kit. It never removes or replaces files or directories you added yourself (e.g. custom rules or skills).
-
-## Scaffolding a new bundle (optional)
-
-The `symfony-bundle-core` skill includes a standalone script to generate a full bundle skeleton with quality tooling, Makefile, and CI:
-
-```bash
-php vendor/symkit/bundle-ai-kit/ai/cursor/skills/symfony-bundle-core/scaffold_bundle.php Acme Blog --with-doctrine --with-ux
-```
-
-Options:
-
-- `--with-doctrine` — entities, XML mapping, repositories
-- `--with-ux` — AssetMapper, Stimulus controllers, Twig Components
-- `--with-flex` — Flex recipe skeleton
+The plugin never deletes user-added files. It copies or overwrites paths that exist in the kit.
 
 ## .gitignore in your bundle
-
-Choose which AI editor directories to ignore. Add any combination of:
 
 ```gitignore
 .cursor/
 .claude/
 .windsurf/
 .agent/
+# Optional: if you regenerate on each machine, ignore synced kit files:
+# AGENTS.md
 ```
 
-Either:
-
-- **Ignore** the directories so each dev gets rules via `composer install`, or
-- **Commit** them after the first install so everyone has rules immediately; run `composer update symkit/bundle-ai-kit` to refresh.
+Either ignore editor dirs and rely on `composer install`, or commit them after first sync and refresh with `composer update symkit/bundle-ai-kit`.
 
 ## Contributing
 
-Issues and pull requests are welcome. Open an issue to discuss changes before sending a PR.
+Issues and pull requests are welcome.
 
 ## License
 

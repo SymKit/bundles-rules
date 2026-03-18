@@ -1,0 +1,95 @@
+---
+name: refactor
+description: >-
+  Light skill: safe refactoring with coverage-first approach. Add missing tests first, then refactor in small verified steps.
+  Can auto-invoke when the user mentions code smell, SOLID violations, technical debt, or requests refactoring.
+version: 2.0.0
+---
+
+# Refactor Pipeline
+
+Safe refactoring pipeline: PM identifies the code smell or SOLID violation and risk, Architect designs a safe path and fills coverage gaps first, Main agent adds tests then refactors in small verified steps and triggers QA to confirm behavioral equivalence and SOLID respect.
+
+## When to Use
+
+- User mentions code smell, technical debt, or "this should be refactored"
+- User references SOLID, DRY, Single Responsibility, or similar principles
+- User wants to improve structure without changing behavior
+- Can auto-invoke when the user clearly describes a refactoring need
+- Do NOT use when: user reports a bug (use `/bug-fix`) or wants new functionality (use `/feature`)
+
+## Instructions
+
+### Phase 0: Scope the Refactor
+
+Use the ask question tool to clarify:
+- "What specific code smell or principle violation are you addressing?"
+- "What are the affected boundaries (class, module, layer)?"
+- "Is behavioral change acceptable, or must behavior remain identical?"
+
+### Phase 1: PM Subagent (Assess & Risk)
+
+Launch the PM subagent with the task:
+
+1. Identify the code smell or SOLID violation — name it (e.g. "God class", "Feature envy", "violates SRP")
+2. Map affected boundaries — which classes, modules, or layers are involved?
+3. Risk assessment — what could break? which areas lack test coverage?
+4. Document scope and constraints — behavior must remain equivalent unless user approves otherwise
+
+**Output:** Code smell analysis, affected boundaries, risk map, scope constraints.
+
+### Phase 2: Architect Subagent (Safe Path)
+
+Launch the Architect subagent in **readonly** mode with the task:
+
+1. Design a safe refactoring path — small, incremental steps, each verifiable
+2. Identify test coverage gaps — what must be covered BEFORE refactoring?
+3. Specify which tests to add first — unit, integration, or characterization tests
+4. Apply SOLID principles — which principle(s) will the refactor satisfy?
+5. List applicable rules from `.cursor/rules/` (e.g. `coding-standards.mdc`, `architecture.mdc`, `testing.mdc`)
+6. Define the sequence: [add test A] → [refactor step 1] → [run tests] → [refactor step 2] → …
+
+**Output:** Refactoring plan with coverage gaps to fill, step sequence, applicable rules.
+
+### Phase 3: Main Agent (Coverage First, Refactor & QA)
+
+You (the main agent) implement. Coverage before refactor is mandatory.
+
+1. Read `coding-standards.mdc`, `testing.mdc`, and any rules the Architect listed
+2. Add missing test coverage FIRST — fill gaps identified by the Architect
+3. Run `make tests` — all tests pass, new tests document current behavior
+4. Refactor in small steps — one change at a time
+5. After EACH refactoring step: run `make tests` — if any test fails, revert or fix immediately
+6. Run `make ci` after completing all steps
+
+**Critical rule:** Never refactor without adequate tests. Never take a step that breaks tests without immediately addressing it.
+
+**Final Verification (QA):** Once all steps are complete, automatically launch the QA subagent (fast model) with the task:
+1. Behavioral equivalence — do the same tests pass before and after? no new failures
+2. SOLID respect — verify the refactored code adheres to the targeted principle(s)
+3. No new dependencies — did the refactor introduce unnecessary coupling or new dependencies?
+4. Rule compliance — does the code follow `coding-standards.mdc` and other applicable rules?
+5. Run `make ci` — report pass/fail
+6. Produce verdict: APPROVED / NEEDS CHANGES / REJECTED
+
+**Output:** QA review with verdict, behavioral equivalence check, SOLID compliance, dependency check.
+
+**User validation:** Present results. If behavior changed unintentionally, revert and add more tests. If QA rejects, address issues and re-run QA.
+
+## Exit Checklist (MANDATORY before concluding)
+
+- [ ] Code smell / SOLID violation identified and documented
+- [ ] Missing test coverage added BEFORE refactoring
+- [ ] Refactored in small steps with `make tests` after EACH step
+- [ ] All tests pass — behavioral equivalence maintained
+- [ ] `make ci` passes
+- [ ] QA subagent launched automatically and confirmed behavioral equivalence and SOLID compliance
+- [ ] No new unnecessary dependencies introduced
+
+## On Failure
+
+- If tests fail mid-refactor: do not proceed — revert the last step, add more tests, or fix the refactor
+- If behavior changes unintentionally: revert, add characterization or regression tests, then retry refactor
+- If SOLID is violated after refactor: the refactor missed the goal — re-read Architect's plan, adjust approach
+- If `make ci` fails: address reported issues, re-run until green
+- If stuck after 3 attempts: ask the user for guidance

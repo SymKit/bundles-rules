@@ -1,0 +1,267 @@
+---
+description: "API Platform: Resources, providers/processors, serialization, validation, Problem Details (optional in bundles)."
+alwaysApply: false
+globs: src/**/*.php
+version: 1.7.0
+---
+
+# API Platform
+
+## Core Principles
+
+1. **Resources separate from Entities** — Dedicated API Resource classes. Never expose Doctrine entities directly.
+2. **DTO mapping via Providers and Processors** — Use Providers (read) and Processors (write) for input/output DTOs. See `dto.mdc` for DTO conventions and naming.
+3. **Validation on input DTOs only** — See `dto.mdc` for validation principles. `#[Assert\...]` on input DTOs and API Resources, never on Doctrine entities.
+4. **Serialization groups convention** — `<resource>:<action>:<level>` (e.g. `order:read:item`, `order:read:collection`, `order:write`). Native Symfony APIs without API Platform use 2-segment groups — see `api.mdc`. See `serializer.mdc` for context builders and discriminator maps.
+5. **CacheableSupportsMethodInterface** — Every custom normalizer must implement it. Without caching, Serializer iterates all normalizers per sub-object.
+6. **Custom constraints with payload** — Use `payload` for RFC 7807 error codes. One global query per validator (no N+1).
+7. **Problem Details RFC 9457 for errors** — Consistent error format: type, title, status, detail, instance. See `error-handling.mdc` for the canonical ExceptionListener pattern.
+8. **Cache headers** — Set `Cache-Control`, `ETag`, `Last-Modified` on read operations. See `caching.mdc` for HTTP cache patterns.
+9. **Pagination defaults** — Enforce default and max items per page. Avoid unbounded collections.
+
+---
+
+## Conventions
+
+### Resources Separate from Entities
+
+**Do:**
+
+```php
+#[ApiResource(
+    operations: [
+        new Get(provider: OrderItemProvider::class),
+        new GetCollection(provider: OrderCollectionProvider::class),
+    ],
+    routePrefix: '/v1',
+)]
+final class OrderResource
+{
+    public function __construct(
+        public string $id,
+        public string $status,
+        public string $total,
+        public \DateTimeInterface $createdAt,
+    ) {}
+}
+```
+
+**Don't:**
+
+```php
+#[ApiResource]
+final class Order extends AbstractEntity  // Entity as resource — Don't
+{
+    // Persistence schema leaks to API; DB changes break API contract
+}
+```
+
+### Serialization Groups Convention
+
+**Do:**
+
+```php
+final readonly class UserReadDto
+{
+    public function __construct(
+        #[Groups(['user:read:item', 'user:read:collection'])]
+        public string $id,
+
+        #[Groups(['user:read:item', 'user:read:collection'])]
+        public string $email,
+
+        #[Groups(['user:read:item'])]
+        public ?string $phone = null,
+    ) {}
+}
+```
+
+**Don't:**
+
+```php
+#[Groups(['read'])]  // Too generic — no resource or level distinction
+public string $email;
+```
+
+### Context Builder for Complex Serialization
+
+**Do:**
+
+```php
+$context = (new ObjectNormalizerContextBuilder())
+    ->withGroups(['user:read:item'])
+    ->withContext(['enable_max_depth' => true])
+    ->toArray();
+$data = $this->normalizer->normalize($dto, null, $context);
+```
+
+**Don't:**
+
+```php
+$this->serializer->serialize($dto, 'json', ['groups' => ['read']]);
+// Duplicated context arrays in every controller
+```
+
+### Custom Normalizer
+
+> See `api.mdc` for the base normalizer pattern (`getSupportedTypes`). In API Platform context, also implement `CacheableSupportsMethodInterface` to avoid `supportsNormalization()` being called on every normalizer for every sub-object.
+
+### Streaming for Large Exports
+
+> See `api.mdc` for the `StreamedJsonResponse` pattern. For CSV exports, use `StreamedResponse` with `fputcsv()`.
+
+### Validation on Input DTOs Only
+
+> See `dto.mdc` for complete DTO validation patterns (immutability, cascade `#[Valid]`, one DTO per use case).
+
+Input DTOs in API Platform use the `CreateXxxInput` naming convention. Validation constraints go on the input DTO, never on entities.
+
+### Custom Constraint with payload for RFC 7807
+
+**Do:**
+
+```php
+#[Assert\NotBlank(payload: ['code' => 'ERR_EMAIL_REQUIRED', 'severity' => 'error'])]
+public string $email;
+
+#[Assert\Length(max: 255, payload: ['code' => 'ERR_NAME_TOO_LONG'])]
+public string $name;
+```
+
+**Don't:**
+
+```php
+#[Assert\NotBlank]  // No payload — generic error, no machine-readable code
+public string $email;
+```
+
+### Custom ConstraintValidator (No N+1)
+
+**Do:**
+
+```php
+public function validate(mixed $value, Constraint $constraint): void
+{
+    $ids = array_map(fn ($item) => $item->getId(), $value);
+    $existingIds = $this->repository->findExistingIds($ids); // 1 query
+    foreach ($value as $item) {
+        if (in_array($item->getId(), $existingIds, true)) {
+            $this->context->buildViolation($constraint->message)->addViolation();
+        }
+    }
+}
+```
+
+**Don't:**
+
+```php
+foreach ($value as $item) {
+    $this->repository->exists($item->getId()); // 1 query per item — N+1
+}
+```
+
+### Compound Constraints for Reusable Validation Groups
+
+**Do:**
+
+```php
+#[\Attribute]
+final class ValidAddress extends Compound
+{
+    protected function getConstraints(array $options): array
+    {
+        return [
+            new Assert\NotBlank(),
+            new Assert\Length(max: 255),
+            new Assert\Regex('/^[a-zA-Z0-9\s,.\-]+$/'),
+        ];
+    }
+}
+```
+
+**Don't:**
+
+```php
+// Repeating same 5 constraints on every address field across 8 DTOs
+#[Assert\NotBlank]
+#[Assert\Length(max: 255)]
+#[Assert\Regex('/^[a-zA-Z0-9\s,.\-]+$/')]
+public string $street;
+```
+
+### Problem Details (RFC 9457)
+
+**Do:**
+
+```yaml
+api_platform:
+    formats:
+        jsonld: ['application/ld+json']
+        json: ['application/json']
+    error_formats:
+        jsonproblem:
+            mime_types: ['application/problem+json']
+```
+
+**Don't:**
+
+```php
+return ['error' => $message, 'code' => $code];  // Non-RFC, inconsistent
+```
+
+### Pagination Defaults
+
+**Do:**
+
+```yaml
+api_platform:
+    collection:
+        pagination:
+            enabled: true
+            items_per_page: 20
+            maximum_items_per_page: 100
+            client_items_per_page: true
+```
+
+**Don't:**
+
+```yaml
+pagination:
+    enabled: false  # Unbounded collections — DoS risk
+```
+
+### Cache Headers
+
+**Do:**
+
+```php
+#[ApiResource(operations: [
+    new Get(cacheHeaders: [
+        'max_age' => 60,
+        'shared_max_age' => 120,
+        'vary' => ['Authorization'],
+    ]),
+])]
+```
+
+**Don't:**
+
+```php
+// No cache headers — every request hits server; no conditional requests
+```
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| Entities as API resources | Dedicated Resource classes. Providers (read) + Processors (write) |
+| `#[Assert\...]` on entities | Validate input DTOs only. See `dto.mdc` |
+| N+1 in custom validators | One global query with all IDs, check in memory. See `doctrine.mdc` > N+1 Prevention |
+| Missing `CacheableSupportsMethodInterface` | Every custom normalizer must implement it + `getSupportedTypes()` |
+| Generic serialization groups (`read`/`write`) | Convention: `<resource>:<action>:<level>` |
+| Inconsistent error format | Problem Details RFC 9457 + `payload` on constraints |
+| No pagination limits | `items_per_page` + `maximum_items_per_page` |
+| Missing cache headers on GET | Set `Cache-Control`, `ETag`, `Last-Modified` |
+| Large exports without streaming | `StreamedResponse` + generator + `fputcsv` |

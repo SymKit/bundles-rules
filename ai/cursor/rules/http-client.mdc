@@ -1,0 +1,228 @@
+---
+description: "HTTP Client: scoped clients, retry, rate limiting, SSRF prevention, MockHttpClient."
+alwaysApply: false
+globs: src/**/*.php,config/**/*.xml
+version: 1.7.0
+---
+
+# HTTP Client
+
+For structured logging conventions in decorators, see `observability.mdc`. For SSRF in a security context, see `security.mdc`.
+
+## Core Principles
+
+1. **Configure in framework.yaml** — Define scoped clients in `framework.http_client.scoped_clients`. Never instantiate `HttpClient::create()` manually.
+2. **One scoped client per external service** — Each integration gets a named client (`github.client`, `payment.client`) with its own `base_uri`, auth, and timeouts.
+3. **Retry strategy** — Enable `retry_failed` with exponential backoff. Configure `max_retries`, `delay`, `multiplier` per client.
+4. **Rate limiting** — Use `ThrottlingHttpClient` via `rate_limiter` config for APIs with quotas.
+5. **SSRF prevention** — Wrap user-provided URLs with `NoPrivateNetworkHttpClient`. Never fetch arbitrary URLs without filtering.
+6. **Decorator pattern** — Custom wrappers for cross-cutting concerns (logging, circuit breaker, metrics). Implement `HttpClientInterface`.
+7. **MockHttpClient for tests** — Use `MockHttpClient` + `MockResponse` in unit tests. Configure `mock_response_factory` for functional tests.
+8. **Type-hint HttpClientInterface** — Inject the interface, not the concrete class. Use `#[Target]` for scoped client injection.
+
+---
+
+## Conventions
+
+### Scoped Client Configuration
+
+**Do:**
+
+```yaml
+# config/packages/framework.yaml
+framework:
+  http_client:
+    default_options:
+      max_redirects: 5
+    scoped_clients:
+      github.client:
+        base_uri: 'https://api.github.com'
+        headers:
+          Accept: 'application/vnd.github.v3+json'
+          Authorization: 'Bearer %env(GITHUB_TOKEN)%'
+        timeout: 10
+        max_duration: 30
+      payment.client:
+        base_uri: '%env(PAYMENT_API_URL)%'
+        auth_bearer: '%env(PAYMENT_API_KEY)%'
+        timeout: 15
+        retry_failed:
+          max_retries: 3
+          delay: 500
+          multiplier: 2
+          http_codes: [429, 500, 502, 503]
+```
+
+**Don't:**
+
+```php
+$client = HttpClient::create([
+    'base_uri' => 'https://api.github.com',
+    'headers' => ['Authorization' => 'Bearer ' . $_ENV['GITHUB_TOKEN']],
+]);
+// Manual instantiation — no DI, no retry, no monitoring
+```
+
+### Injecting Scoped Clients
+
+**Do:**
+
+```php
+use Symfony\Component\DependencyInjection\Attribute\Target;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
+
+final readonly class GitHubApiClient
+{
+    public function __construct(
+        #[Target('github.client')]
+        private HttpClientInterface $client,
+    ) {}
+
+    public function getRepository(string $owner, string $repo): array
+    {
+        $response = $this->client->request('GET', "/repos/{$owner}/{$repo}");
+        return $response->toArray();
+    }
+}
+```
+
+**Don't:**
+
+```php
+final class GitHubApiClient
+{
+    public function __construct(private HttpClientInterface $client) {}
+    // Injects default client — no scoped config (base_uri, auth, retry)
+}
+```
+
+### Retry Strategy
+
+**Do:**
+
+```yaml
+scoped_clients:
+  payment.client:
+    base_uri: '%env(PAYMENT_API_URL)%'
+    retry_failed:
+      max_retries: 3
+      delay: 1000
+      multiplier: 2
+      http_codes: [429, 500, 502, 503]
+```
+
+**Don't:**
+
+```php
+try {
+    $response = $this->client->request('POST', '/charge');
+} catch (TransportException $e) {
+    $response = $this->client->request('POST', '/charge');  // Manual retry — no backoff
+}
+```
+
+### SSRF Prevention
+
+**Do:**
+
+```php
+use Symfony\Component\HttpClient\NoPrivateNetworkHttpClient;
+
+final readonly class WebhookDispatcher
+{
+    public function __construct(
+        private HttpClientInterface $client,
+    ) {}
+
+    public function dispatch(string $userProvidedUrl, array $payload): void
+    {
+        $safeClient = new NoPrivateNetworkHttpClient($this->client);
+        $safeClient->request('POST', $userProvidedUrl, ['json' => $payload]);
+    }
+}
+```
+
+**Don't:**
+
+```php
+$this->client->request('POST', $userProvidedUrl, ['json' => $payload]);
+// User can target http://169.254.169.254 (AWS metadata) or internal services
+```
+
+### Decorator Pattern — Logging Wrapper
+
+**Do:**
+
+```php
+final readonly class LoggingHttpClient implements HttpClientInterface
+{
+    public function __construct(
+        private HttpClientInterface $inner,
+        private LoggerInterface $logger,
+    ) {}
+
+    public function request(string $method, string $url, array $options = []): ResponseInterface
+    {
+        $this->logger->info('HTTP request', ['method' => $method, 'url' => $url]);
+        return $this->inner->request($method, $url, $options);
+    }
+
+    // delegate withOptions(), stream() to $this->inner
+}
+```
+
+### Testing with MockHttpClient
+
+**Do:**
+
+```php
+use Symfony\Component\HttpClient\MockHttpClient;
+use Symfony\Component\HttpClient\Response\MockResponse;
+
+public function test_get_repository_returns_data(): void
+{
+    $mock = new MockHttpClient([
+        new MockResponse(json_encode(['name' => 'my-repo']), [
+            'http_code' => 200,
+            'response_headers' => ['Content-Type' => 'application/json'],
+        ]),
+    ]);
+
+    $client = new GitHubApiClient($mock);
+    $result = $client->getRepository('owner', 'my-repo');
+
+    self::assertSame('my-repo', $result['name']);
+}
+
+public function test_handles_api_error(): void
+{
+    $mock = new MockHttpClient([
+        new MockResponse('', ['http_code' => 404]),
+    ]);
+
+    $client = new GitHubApiClient($mock);
+    $this->expectException(NotFoundException::class);
+    $client->getRepository('owner', 'nonexistent');
+}
+```
+
+**Don't:**
+
+```php
+// Mocking HttpClientInterface with PHPUnit mocks — misses response streaming behavior
+$client = $this->createMock(HttpClientInterface::class);
+```
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| `HttpClient::create()` in services | Configure in `framework.yaml`, inject via DI |
+| Single client for all APIs | One scoped client per external service with dedicated config |
+| No retry on transient failures | `retry_failed` with exponential backoff in scoped client config |
+| User-provided URLs without filtering | `NoPrivateNetworkHttpClient` for SSRF prevention |
+| PHPUnit mocks for HttpClient | `MockHttpClient` + `MockResponse` (respects streaming contract) |
+| Cross-cutting concerns in every client | Decorator pattern implementing `HttpClientInterface` |
+| Hardcoded base URIs in code | `base_uri` in scoped client config, env vars for per-env values |

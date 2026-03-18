@@ -1,0 +1,242 @@
+---
+description: "Observability: PSR-3, structured logging, LogSubscriber, Monolog, FingersCrossed, PII masking."
+alwaysApply: false
+globs: src/**/*.php,config/**/*.xml
+version: 1.7.0
+---
+
+# Observability
+
+## Core Principles
+
+1. **PSR-3 only** — Depend on `Psr\Log\LoggerInterface`. Never import Monolog classes in services (DIP, portability).
+2. **No LoggerInterface in domain** — Domain emits events; infrastructure `LogSubscriber` listens and logs. See `architecture.mdc` > Domain Events.
+3. **Structured logging only** — Fixed message string + context array. Never string interpolation or sprintf in log messages.
+4. **Uniform context keys** — Use a `LogKeys` constants class. No inconsistent `user_id` / `UserId` / `u_id` variants.
+5. **One Monolog channel per bounded context** — Route logs independently (alerts vs cold storage): `security`, `billing`, `api_inbound`.
+6. **FingersCrossedHandler in production** — Buffer DEBUG logs; flush everything only when ERROR occurs. I/O savings.
+7. **Stdout/stderr, never HTTP in request thread** — Write locally (stdout for Docker/K8s, file for bare metal). Agent (Filebeat, Fluentd, Vector) transfers async (Bulkhead).
+8. **PII never in plain text logs** — Mask emails, passwords, tokens, IPs via Monolog processor (GDPR, PCI-DSS).
+9. **Dedicated channel for sensitive flows** — `billing`, `security` channels for audit-critical streams. See `security.mdc` for security logging requirements.
+10. **Test logging behavior explicitly** — `NullLogger` in unit tests; `TestLogger` in integration tests when asserting log output.
+
+---
+
+## Conventions
+
+### LogSubscriber Pattern — Event-Driven Logging
+
+Create a `XxxLogSubscriber` per domain event. Implement `EventSubscriberInterface`, inject `LoggerInterface` (appropriate channel if configured).
+
+**Do:**
+
+```php
+final readonly class OrderPaidLogSubscriber implements EventSubscriberInterface
+{
+    public function __construct(private LoggerInterface $logger) {}
+
+    public static function getSubscribedEvents(): array
+    {
+        return [OrderPaidEvent::class => 'onOrderPaid'];
+    }
+
+    public function onOrderPaid(OrderPaidEvent $event): void
+    {
+        $this->logger->info('Order paid', [
+            LogKeys::ORDER_ID => $event->getOrderId()->toString(),
+            LogKeys::AMOUNT => $event->getAmount(),
+            LogKeys::USER_ID => $event->getUserId()->toString(),
+        ]);
+    }
+}
+```
+
+**Don't:**
+
+```php
+final readonly class PlaceOrderHandler
+{
+    public function __construct(
+        private OrderRepositoryInterface $repo,
+        private LoggerInterface $logger,  // Domain depends on logging infrastructure
+    ) {}
+}
+```
+
+### Structured Logging — Fixed Message + Context Array
+
+**Do:**
+
+```php
+$this->logger->error('Payment failed', [
+    LogKeys::USER_ID => $userId->toString(),
+    LogKeys::AMOUNT => $amount,
+    LogKeys::ERROR_CODE => $errorCode,
+]);
+```
+
+**Don't:**
+
+```php
+$this->logger->error("Payment failed for user {$user->getId()} amount={$amount}");
+$this->logger->error(sprintf('Payment failed for %s', $user->getId()));
+```
+
+### Uniform Context Keys via LogKeys
+
+**Do:**
+
+```php
+final class LogKeys
+{
+    public const string USER_ID = 'user_id';
+    public const string TRACE_ID = 'trace_id';
+    public const string ORDER_ID = 'order_id';
+    public const string AMOUNT = 'amount';
+    public const string PAYMENT_ID = 'payment_id';
+    public const string ERROR_CODE = 'error_code';
+
+    private function __construct() {}
+}
+```
+
+**Don't:**
+
+```php
+$logger->info('Order paid', ['UserId' => $id]);   // Inconsistent casing
+$logger->info('Order paid', ['u_id' => $id]);      // Inconsistent naming
+```
+
+### Monolog Channels per Bounded Context
+
+**Do:**
+
+```yaml
+# config/packages/prod/monolog.yaml
+monolog:
+  channels: ['security', 'billing', 'api_inbound']
+  handlers:
+    billing:
+      type: stream
+      path: php://stderr
+      level: info
+      channels: ['billing']
+    security:
+      type: stream
+      path: php://stderr
+      level: info
+      channels: ['security']
+```
+
+**Don't:**
+
+```yaml
+monolog:
+  handlers:
+    main:
+      type: stream
+      path: '%kernel.logs_dir%/%kernel.environment%.log'
+      # Single channel — impossible to route or filter in production
+```
+
+### FingersCrossedHandler in Production
+
+**Do:**
+
+```yaml
+# config/packages/prod/monolog.yaml
+monolog:
+  handlers:
+    main:
+      type: fingers_crossed
+      action_level: error
+      handler: nested
+      excluded_404s: true
+    nested:
+      type: stream
+      path: php://stderr
+      level: debug
+```
+
+**Don't:**
+
+```yaml
+# Writing every DEBUG log to disk in production — I/O waste
+monolog:
+  handlers:
+    main:
+      type: stream
+      path: '%kernel.logs_dir%/prod.log'
+      level: debug
+```
+
+### PII Masking via Monolog Processor
+
+**Do:**
+
+```php
+final class SensitiveDataProcessor implements ProcessorInterface
+{
+    private const MASK = '***REDACTED***';
+    private const SENSITIVE_KEYS = ['password', 'token', 'api_key', 'email', 'card_number', 'ip'];
+
+    public function __invoke(LogRecord $record): LogRecord
+    {
+        $context = $record->context;
+        foreach (self::SENSITIVE_KEYS as $key) {
+            if (isset($context[$key])) {
+                $context[$key] = self::MASK;
+            }
+        }
+        return $record->with(context: $context);
+    }
+}
+```
+
+**Don't:**
+
+```php
+$this->logger->info('User login', [
+    'email' => $user->getEmail(),       // PII in plain text — GDPR violation
+    'token' => $jwt,                    // Secret in logs
+]);
+```
+
+### Testing — NullLogger and TestLogger
+
+**Do:**
+
+```php
+// Unit tests: NullLogger — no noise, log is not a business rule
+$service = new MyService(logger: new NullLogger());
+
+// Integration tests: TestLogger for asserting log output
+use ColinODell\PsrTestLogger\TestLogger;
+$logger = new TestLogger();
+$subscriber = new OrderPaidLogSubscriber($logger);
+$subscriber->onOrderPaid($event);
+self::assertTrue($logger->hasInfoThatContains('Order paid'));
+```
+
+**Don't:**
+
+```php
+// Mocking LoggerInterface in every unit test — noise
+$logger = $this->createMock(LoggerInterface::class);
+$logger->expects(self::once())->method('info'); // Brittle assertion on log level
+```
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| Monolog classes in service constructors | Depend on `Psr\Log\LoggerInterface` only (DIP) |
+| `LoggerInterface` in domain handlers | Emit events. `LogSubscriber` in infrastructure logs |
+| Unstructured log messages (sprintf/concat) | Fixed message + context array. Use `LogKeys` constants |
+| PII in plain text logs | `SensitiveDataProcessor` in Monolog masks sensitive keys |
+| No `FingersCrossedHandler` in prod | Buffer DEBUG, flush on ERROR only |
+| HTTP log shipping in request thread | Write to stdout/stderr. Agent (Filebeat/Vector) ships async |
+| Inconsistent context keys across team | `LogKeys` constants class. Enforce via code review |
+| No dedicated channel for billing/security | One channel per bounded context in Monolog config |

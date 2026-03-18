@@ -1,0 +1,298 @@
+---
+description: "Forms: DTO binding, FormType, EventSubscriber, DataTransformer (bundle FormTypes)."
+alwaysApply: false
+globs: src/**/*.php
+version: 1.7.0
+---
+
+# Forms
+
+## Core Principles
+
+1. **DTO-only binding** — Forms hydrate DTOs, NEVER Doctrine entities. See `dto.mdc` for DTO conventions. Form DTOs use `XxxFormData` naming and are NOT readonly (forms need property write access).
+2. **Anemic controller** — Controller creates the form, handles submission, dispatches the DTO to a handler. See `dto.mdc > DTO to Entity Mapping`.
+3. **HTTP-agnostic FormType** — FormType never touches `Request`, `Session`, or services directly. All context through `$options`.
+4. **Validation on the DTO** — `#[Assert\...]` on DTO properties (see `dto.mdc`). FormType `constraints` option only for edge cases. See `validator.mdc` for custom constraints and CompoundConstraint.
+5. **EventSubscriber for dynamic fields** — Conditional fields added via `FormEvents::PRE_SUBMIT` subscribers. No conditional logic in `buildForm`.
+6. **DataTransformers in separate classes** — Complex value conversions extracted into dedicated `DataTransformerInterface` implementations.
+7. **OptionsResolver fail-fast** — Custom options typed with `setAllowedTypes()` / `setAllowedValues()`. Invalid config fails at form creation, not at runtime.
+8. **TypeTestCase for every FormType** — Submit an array, assert the hydrated DTO. No database, no kernel boot.
+9. **Form themes for reusable UI** — Shared widget/label/row rendering in dedicated Twig files. No ad-hoc overrides if reused. See `twig.mdc` for template conventions.
+10. **API endpoints skip forms** — For JSON APIs, see `api.mdc` (MapRequestPayload, MapQueryString). Forms are for Twig/UI only.
+
+---
+
+## Conventions
+
+### DTO-Based Form Binding
+
+> See `dto.mdc > Form-Specific DTO` for the full pattern. Form DTOs use `XxxFormData` naming and are NOT readonly.
+
+**Do:**
+
+```php
+final class CreateArticleFormData
+{
+    public function __construct(
+        #[Assert\NotBlank]
+        #[Assert\Length(min: 3, max: 255)]
+        public string $title = '',
+
+        #[Assert\NotBlank]
+        public string $content = '',
+
+        #[Assert\Choice(choices: ['draft', 'published'])]
+        public string $status = 'draft',
+    ) {}
+}
+```
+
+**Don't:**
+
+```php
+$form = $this->createForm(ArticleType::class, $articleEntity);
+// Entity bound to form — validation and form concerns leak into persistence model
+```
+
+### Anemic Controller (Form Context)
+
+**Do:**
+
+```php
+#[Route('/article/new', name: 'app_article_new', methods: ['GET', 'POST'])]
+public function new(Request $request, CreateArticleHandler $handler): Response
+{
+    $dto = new CreateArticleFormData();
+    $form = $this->createForm(CreateArticleType::class, $dto);
+    $form->handleRequest($request);
+
+    if ($form->isSubmitted() && $form->isValid()) {
+        $handler($dto);
+
+        return $this->redirectToRoute('app_article_list');
+    }
+
+    return $this->render('article/new.html.twig', ['form' => $form]);
+}
+```
+
+**Don't:** Put entity creation, persistence, or side effects in the controller. See `dto.mdc > DTO to Entity Mapping` and `coding-standards.mdc > No Business Logic in Controllers`.
+
+### FormType — Focused and Typed
+
+**Do:**
+
+```php
+final class CreateArticleType extends AbstractType
+{
+    public function buildForm(FormBuilderInterface $builder, array $options): void
+    {
+        $builder
+            ->add('title', TextType::class)
+            ->add('content', TextareaType::class)
+            ->add('status', ChoiceType::class, [
+                'choices' => ['Draft' => 'draft', 'Published' => 'published'],
+            ]);
+    }
+
+    public function configureOptions(OptionsResolver $resolver): void
+    {
+        $resolver->setDefaults(['data_class' => CreateArticleFormData::class]);
+    }
+}
+```
+
+**Don't:**
+
+```php
+final class ArticleType extends AbstractType
+{
+    public function buildForm(FormBuilderInterface $builder, array $options): void
+    {
+        $builder->add('title')->add('content')->add('status');
+        // No explicit types — Symfony guesses, often wrong
+        // No data_class — form returns array, no type safety
+    }
+}
+```
+
+### OptionsResolver — Fail Fast
+
+**Do:**
+
+```php
+public function configureOptions(OptionsResolver $resolver): void
+{
+    $resolver->setDefaults(['data_class' => CreateArticleFormData::class]);
+    $resolver->setDefined('category_choices');
+    $resolver->setAllowedTypes('category_choices', 'array');
+    $resolver->setRequired('category_choices');
+}
+```
+
+**Don't:** Pass untyped options and check them manually in `buildForm` — fails late with confusing errors.
+
+### EventSubscriber for Dynamic Fields
+
+**Do:**
+
+```php
+final class CompanyFieldSubscriber implements EventSubscriberInterface
+{
+    public static function getSubscribedEvents(): array
+    {
+        return [FormEvents::PRE_SUBMIT => 'onPreSubmit'];
+    }
+
+    public function onPreSubmit(PreSubmitEvent $event): void
+    {
+        $data = $event->getData();
+        if (($data['type'] ?? '') === 'professional') {
+            $event->getForm()->add('siret', TextType::class, [
+                'constraints' => [new Assert\NotBlank(), new Assert\Length(exactly: 14)],
+            ]);
+        }
+    }
+}
+```
+
+```php
+// In the FormType
+public function buildForm(FormBuilderInterface $builder, array $options): void
+{
+    $builder
+        ->add('name', TextType::class)
+        ->add('type', ChoiceType::class, [
+            'choices' => ['Individual' => 'individual', 'Professional' => 'professional'],
+        ])
+        ->addEventSubscriber(new CompanyFieldSubscriber());
+}
+```
+
+**Don't:**
+
+```php
+public function buildForm(FormBuilderInterface $builder, array $options): void
+{
+    $builder->add('name')->add('type');
+    if ($options['is_professional']) {
+        $builder->add('siret');
+    }
+    // Static option — cannot react to user input at submission time
+}
+```
+
+### DataTransformer for Complex Conversions
+
+**Do:**
+
+```php
+final class TagsToStringTransformer implements DataTransformerInterface
+{
+    /** @param list<string> $value */
+    public function transform(mixed $value): string
+    {
+        return implode(', ', $value ?? []);
+    }
+
+    public function reverseTransform(mixed $value): array
+    {
+        if (!is_string($value) || '' === $value) {
+            return [];
+        }
+
+        return array_map('trim', explode(',', $value));
+    }
+}
+```
+
+**Don't:** Put conversion logic in `buildForm` or in the controller — scattered, duplicated, untestable.
+
+### Collection Types
+
+**Do:**
+
+```php
+$builder->add('lines', CollectionType::class, [
+    'entry_type' => OrderLineType::class,
+    'allow_add' => true,
+    'allow_delete' => true,
+    'by_reference' => false,
+    'prototype' => true,
+]);
+```
+
+**Don't:** Manage dynamic sub-forms manually with JavaScript without `CollectionType` — breaks CSRF, validation, and data mapping.
+
+### TypeTestCase
+
+**Do:**
+
+```php
+final class CreateArticleTypeTest extends TypeTestCase
+{
+    public function testSubmitValidData(): void
+    {
+        $form = $this->factory->create(CreateArticleType::class);
+        $form->submit([
+            'title' => 'My Article',
+            'content' => 'Article body content here.',
+            'status' => 'draft',
+        ]);
+
+        self::assertTrue($form->isSynchronized());
+
+        $dto = $form->getData();
+        self::assertInstanceOf(CreateArticleFormData::class, $dto);
+        self::assertSame('My Article', $dto->title);
+        self::assertSame('draft', $dto->status);
+    }
+
+    public function testSubmitInvalidDataHasErrors(): void
+    {
+        $form = $this->factory->create(CreateArticleType::class);
+        $form->submit(['title' => '', 'content' => '', 'status' => 'invalid']);
+
+        self::assertTrue($form->isSubmitted());
+        self::assertFalse($form->isValid());
+    }
+}
+```
+
+**Don't:** Test forms only through functional/browser tests — slow, coupled to routing, misses unit regressions.
+
+### choice_loader for Large Datasets
+
+**Do:**
+
+```php
+$builder->add('category', ChoiceType::class, [
+    'choice_loader' => new CallbackChoiceLoader(fn () => $this->categoryRepository->findActive()),
+    'choice_value' => 'id',
+    'choice_label' => 'name',
+]);
+```
+
+**Don't:**
+
+```php
+$builder->add('category', EntityType::class, [
+    'class' => Category::class,
+    // Loads ALL categories in memory — OOM with thousands of rows
+]);
+```
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| Form bound to Doctrine entity | Bind to DTO (`XxxFormData`). See `dto.mdc` |
+| Business logic in controller | Controller dispatches DTO to handler. See `coding-standards.mdc` |
+| Missing TypeTestCase | `TypeTestCase` for every FormType. Submit array, assert DTO |
+| Dynamic fields via static `$options` | `FormEvents::PRE_SUBMIT` subscriber for dynamic fields |
+| EntityType loading all rows | `choice_loader` with paginated query or UX Autocomplete |
+| DataTransformer inline in buildForm | Extract to dedicated `DataTransformerInterface` class |
+| CSRF disabled without justification | Keep enabled. Disable only on public GET + document reason |
+| Forms used for JSON API endpoints | See `api.mdc` for MapRequestPayload. Forms for Twig/UI only |

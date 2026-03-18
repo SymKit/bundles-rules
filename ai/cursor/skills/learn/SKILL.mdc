@@ -1,0 +1,69 @@
+---
+name: learn
+description: >-
+  Light skill: extract lessons from the current conversation and append to docs/lessons-learned.md.
+  Can auto-invoke when the user says "lesson", "what did we learn", "capture this", or asks to document takeaways.
+version: 1.7.0
+---
+
+# Learn — Extract Lessons Learned
+
+Extract actionable lessons from the current conversation and append them to `docs/lessons-learned.md` in a structured format. Enables retroactive learning and avoids repeating mistakes.
+
+## When to Use
+
+- User says "lesson", "what did we learn", "capture this", "document takeaways"
+- User asks to extract lessons from the conversation
+- Can auto-invoke when the user explicitly requests lesson extraction
+- Do NOT use when: user asks for feature, bug fix, or other workflow (use the relevant skill)
+
+## Instructions
+
+### Step 1: Ask User What to Capture
+
+Use the ask question tool:
+- "Which aspects of this conversation should I capture? For example: bugs encountered, architecture decisions, patterns discovered, gotchas, performance insights, security considerations."
+- If the conversation was long: "Should I focus on specific parts (e.g. the refactoring phase, the bug fix) or the whole conversation?"
+
+### Step 2: Review Conversation History
+
+Review the full conversation history. Identify:
+- **Bugs encountered** — what went wrong, root cause, fix applied
+- **Architecture decisions** — choices made and rationale
+- **Patterns discovered** — conventions or approaches that worked well
+- **Gotchas** — non-obvious pitfalls, edge cases, tool quirks
+- **Performance insights** — bottlenecks, optimizations, trade-offs
+- **Security considerations** — vulnerabilities discussed, mitigations
+
+### Step 3: Extract Lessons in Structured Format
+
+For each lesson, structure as:
+- **Date** (YYYY-MM-DD)
+- **Context** — brief summary of the situation
+- **Lesson** — what was learned
+- **Impact** — how this affects future work (optional)
+
+### Step 4: Append to docs/lessons-learned.md
+
+Append the extracted lessons to `docs/lessons-learned.md`. If the file does not exist, create it with a header and the first entry. Use a consistent markdown structure (e.g. ## YYYY-MM-DD or ### Lesson blocks). No code blocks unless strictly necessary for the lesson (prefer references to files or `.cursor/rules/` rules).
+
+### Step 5: Challenge Retroactively
+
+Use the ask question tool:
+- "Would you like to challenge any decision we made during this conversation? Anything you'd do differently in hindsight?"
+- If the user identifies a decision to revisit: add it as a lesson with the format "Retrospective: [decision] — reconsider because [reason]"
+
+## Exit Checklist (MANDATORY before concluding)
+
+- [ ] User confirmed which aspects to capture
+- [ ] Conversation history reviewed
+- [ ] Lessons extracted in structured format (date, context, lesson, impact)
+- [ ] docs/lessons-learned.md created or appended
+- [ ] User asked about retrospective challenges
+
+## On Failure
+
+- If docs/ directory does not exist: create it, then create lessons-learned.md
+- If conversation has no extractable lessons: ask user "This conversation didn't surface obvious lessons. Would you like me to document the workflow we followed for future reference?"
+- If user provides conflicting feedback on what to capture: prioritize their explicit choices, summarize the rest as optional addendum
+- If stuck after 3 attempts: ask the user for guidance

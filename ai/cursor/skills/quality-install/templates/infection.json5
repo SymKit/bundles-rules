@@ -1,0 +1,12 @@
+{
+    "source": {
+        "directories": ["src"]
+    },
+    "logs": {
+        "text": "infection.log",
+        "html": "infection-report.html"
+    },
+    "minMsi": 70,
+    "minCoveredMsi": 80,
+    "threads": "max"
+}

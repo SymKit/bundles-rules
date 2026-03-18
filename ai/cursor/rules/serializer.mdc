@@ -1,0 +1,216 @@
+---
+description: "Serializer: normalizers, groups, context builders, circular refs, discriminator map."
+alwaysApply: false
+globs: src/**/*.php
+version: 1.7.0
+---
+
+# Serializer
+
+For API serialization groups in native Symfony APIs, see `api.mdc`. For API Platform serialization, see `api-platform.mdc`. For DTO conventions, see `dto.mdc`.
+
+## Core Principles
+
+1. **Groups control exposure** — Every serialized property must belong to at least one `#[Groups]` group. Never serialize without groups (leaks internal fields). Native API uses 2-segment groups (`entity:operation`), API Platform uses 3-segment (`resource:operation:scope`) — see respective rules.
+2. **Normalizers over `serialize()`** — Custom `NormalizerInterface` implementations for domain-specific transformations. Never override `serialize()` on entities.
+3. **Context builders (Symfony 7.1+)** — Use `withContext()` and `SerializerContextBuilder` for reusable serialization contexts instead of ad-hoc arrays.
+4. **Circular reference handler** — Configure `circular_reference_handler` globally. Default: return entity ID. Never let circular refs throw unhandled exceptions.
+5. **Discriminator map for inheritance** — Use `#[DiscriminatorMap]` on abstract base classes. Every concrete subclass must be registered. Deserialization of unknown types must fail explicitly.
+6. **DTO as serialization boundary** — Serialize DTOs, not entities. Entities carry Doctrine proxies, lazy collections, and internal state unsuitable for API responses. See `dto.mdc`.
+7. **Name converters** — Use `CamelCaseToSnakeCaseNameConverter` or `MetadataAwareNameConverter` globally. Never mix naming conventions within the same API.
+8. **Max depth for relations** — Set `#[MaxDepth]` on nested relations to prevent infinite recursion and control response payload size.
+
+---
+
+## Conventions
+
+### Serialization Groups on DTOs
+
+**Do:**
+
+```php
+use Symfony\Component\Serializer\Attribute\Groups;
+
+final readonly class OrderResponse
+{
+    public function __construct(
+        #[Groups(['order:read'])]
+        public string $id,
+        #[Groups(['order:read'])]
+        public string $status,
+        #[Groups(['order:read:detail'])]
+        public array $items,
+    ) {}
+}
+```
+
+**Don't:**
+
+```php
+// No groups — every property serialized, including internal fields
+final readonly class OrderResponse
+{
+    public function __construct(
+        public string $id,
+        public string $internalTrackingCode, // Leaked to API consumer
+    ) {}
+}
+```
+
+### Custom Normalizer
+
+**Do:**
+
+```php
+final class MoneyNormalizer implements NormalizerInterface
+{
+    public function normalize(mixed $data, ?string $format = null, array $context = []): array
+    {
+        assert($data instanceof Money);
+
+        return [
+            'amount' => $data->getAmount(),
+            'currency' => $data->getCurrency()->getCode(),
+        ];
+    }
+
+    public function supportsNormalization(mixed $data, ?string $format = null, array $context = []): bool
+    {
+        return $data instanceof Money;
+    }
+
+    public function getSupportedTypes(?string $format): array
+    {
+        return [Money::class => true];
+    }
+}
+```
+
+**Don't:**
+
+```php
+// Transforming in the entity getter — couples domain to presentation
+public function getPrice(): array
+{
+    return ['amount' => $this->price->getAmount(), 'currency' => $this->price->getCurrency()];
+}
+```
+
+### Circular Reference Handler
+
+**Do:**
+
+```yaml
+framework:
+    serializer:
+        circular_reference_handler: 'App\Serializer\CircularReferenceHandler'
+        default_context:
+            circular_reference_handler: !service App\Serializer\CircularReferenceHandler
+```
+
+```php
+final class CircularReferenceHandler
+{
+    public function __invoke(object $object, string $format, array $context): string
+    {
+        return method_exists($object, 'getId') ? (string) $object->getId() : spl_object_hash($object);
+    }
+}
+```
+
+**Don't:**
+
+```php
+// No handler — 500 error on circular references in production
+```
+
+### Discriminator Map
+
+**Do:**
+
+```php
+use Symfony\Component\Serializer\Attribute\DiscriminatorMap;
+
+#[DiscriminatorMap(typeProperty: 'type', mapping: [
+    'credit_card' => CreditCardPayment::class,
+    'bank_transfer' => BankTransferPayment::class,
+])]
+abstract class Payment
+{
+    public function __construct(
+        public readonly string $id,
+        public readonly int $amount,
+    ) {}
+}
+```
+
+**Don't:**
+
+```php
+// Manual type switching in controller — fragile, no validation
+$type = $data['type'];
+$payment = match ($type) {
+    'credit_card' => new CreditCardPayment(...),
+    default => throw new \RuntimeException('Unknown type'),
+};
+```
+
+### Context Builders
+
+**Do:**
+
+```php
+$context = (new ObjectNormalizerContextBuilder())
+    ->withGroups(['order:read'])
+    ->withEnableMaxDepth(true)
+    ->toArray();
+
+$json = $this->serializer->serialize($orderDto, 'json', $context);
+```
+
+**Don't:**
+
+```php
+// Ad-hoc array context — typos not caught, no IDE support
+$json = $this->serializer->serialize($dto, 'json', ['grups' => ['order:read']]); // Typo: silent bug
+```
+
+### Max Depth on Relations
+
+**Do:**
+
+```php
+use Symfony\Component\Serializer\Attribute\MaxDepth;
+
+final readonly class OrderResponse
+{
+    public function __construct(
+        #[Groups(['order:read'])]
+        public string $id,
+        #[Groups(['order:read'])]
+        #[MaxDepth(1)]
+        public CustomerResponse $customer,
+    ) {}
+}
+```
+
+**Don't:**
+
+```php
+// No MaxDepth — Customer→Orders→Customer→Orders infinite loop
+```
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| Serializing entities directly | Serialize DTOs. Entities carry proxies and lazy collections |
+| No groups on properties | Every property needs `#[Groups]`. Prevents accidental field exposure |
+| Unhandled circular references | Configure `circular_reference_handler` globally to return IDs |
+| Missing discriminator subclass | Register every concrete subclass in `#[DiscriminatorMap]`. CI test recommended |
+| Ad-hoc context arrays | Use context builders for type safety and IDE support |
+| Mixed naming conventions | Set `name_converter` globally. One convention per API |
+| No `#[MaxDepth]` on relations | Set max depth on all nested relation properties |
+| `serialize()` on entities | Use custom `NormalizerInterface` implementations instead |

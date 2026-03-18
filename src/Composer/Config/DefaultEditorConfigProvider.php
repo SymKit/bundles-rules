@@ -42,24 +42,28 @@ final class DefaultEditorConfigProvider implements EditorConfigProviderInterface
                 '.cursor/skills',
                 'mdc',
                 $this->cursorConverter,
+                '.cursor/agents',
             ),
             'claude' => new EditorConfig(
                 '.claude/rules',
                 '.claude/rules/skills',
                 'md',
                 $this->claudeConverter,
+                '.claude/agents',
             ),
             'windsurf' => new EditorConfig(
                 '.windsurf/rules',
                 '.windsurf/rules/skills',
                 'md',
                 $this->windsurfConverter,
+                '.windsurf/agents',
             ),
             'antigravity' => new EditorConfig(
                 '.agent/rules',
                 '.agent/rules/skills',
                 'md',
                 $this->antigravityConverter,
+                '.agent/agents',
             ),
             default => null,
         };

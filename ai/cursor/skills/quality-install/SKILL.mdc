@@ -1,0 +1,95 @@
+---
+name: quality-install
+description: >-
+  Heavy skill: setup quality tooling in a Symfony bundle package repo (PHPStan, CS-Fixer/Pint, Deptrac, Infection, GrumPHP).
+  ONLY invoke when the user explicitly types /quality-install. Never auto-apply.
+version: 2.0.0
+---
+
+# Quality Install — Setup Quality Tooling
+
+Setup the full quality pipeline in a **Symfony bundle** package (typically `src/` + `tests/`): PHPStan level 9, PHP-CS-Fixer or Pint, Deptrac, Infection, GrumPHP. Creates configuration files and the three Makefile targets (quality, tests, ci). **Use the files in this skill's `templates/` folder as the single reference** — copy and adapt to the project; do not duplicate their content in the skill or in rules. The rule `quality-pipeline.mdc` defines the contract (three targets, semantics); the templates provide the implementation.
+
+## When to Use
+
+- User explicitly types `/quality-install` or requests quality tooling setup
+- User wants to add PHPStan, CS-Fixer, Deptrac, Infection, or GrumPHP to their project
+- Do NOT use when: user asks for a feature, bug fix, or onboarding (use the relevant skill)
+
+## Instructions
+
+### Step 1: Ask What's Already Installed (or Detect)
+
+Use the ask question tool:
+- "Which quality tools do you already have? PHPStan, PHP-CS-Fixer, Pint, Deptrac, Infection, GrumPHP?"
+- Alternatively, read `composer.json` to detect: `phpstan/phpstan`, `friendsofphp/php-cs-fixer` or `laravel/pint`, `deptrac/deptrac` (not qossmic/deptrac-shim), `infection/infection`, `phpro/grumphp`
+- If detection is ambiguous, ask the user to confirm
+
+### Step 2: Install Missing Tools
+
+For each tool not present, add via Composer. Use only `make` commands if the project has a Makefile with `composer require` targets. Otherwise, instruct the user to run the appropriate commands (this skill does not contain PHP/YAML — the agent runs `composer require` as a one-time setup step, or the project may have `make deps` / similar).
+
+**Tools to ensure:**
+- **PHPStan** — level 9, no baseline
+- **PHP-CS-Fixer** or **Pint** — code style
+- **Deptrac** — use `deptrac/deptrac` only; do NOT install `qossmic/deptrac-shim` (abandoned)
+- **Infection** — mutation testing
+- **GrumPHP** — pre-commit hooks
+
+Reference `quality-pipeline.mdc` for version and config requirements.
+
+### Step 3: Create or Update Makefile Targets (3 targets only)
+
+Ensure the project has exactly these three targets (in the root Makefile or in **Makefile-solution** if the root Makefile `include`s it):
+- `make quality` — lint, Deptrac, PHPStan, CS check (all quality tools)
+- `make tests` — PHPUnit, Infection (all test tools)
+- `make ci` — full pipeline (quality + tests; optionally composer audit)
+
+**Makefile-solution:** If the root Makefile includes `Makefile-solution`, add or edit these targets in Makefile-solution only. Use the `templates/Makefile` in this skill as reference — copy and adapt to the project (paths, Docker, etc.).
+
+### Step 4: Create Configuration Files (from templates)
+
+Create or update config files by **copying from this skill's `templates/` folder** and adapting to the project (paths, excludePaths, layers). Do not redefine file contents in the skill or in the rule — the templates are the single source of truth for implementation.
+
+- `templates/phpstan.neon.dist` → phpstan.neon (level 9)
+- `templates/.php-cs-fixer.dist.php` → .php-cs-fixer.dist.php or Pint config
+- `templates/deptrac.yaml` → deptrac.yaml
+- `templates/grumphp.yml` → grumphp.yml (pre-commit calls `make quality`)
+- `templates/infection.json5` → infection.json5
+- `templates/phpunit.xml.dist` → phpunit.xml.dist if needed
+
+Read `quality-pipeline.mdc` for the contract (PHPStan level 9, no baseline, Infection MSI, etc.); use templates for the actual file content.
+
+### Step 5: Run make ci to Verify
+
+Run `make ci` (or the equivalent target). If it fails:
+- Fix reported issues (security-check, PHPStan errors, CS violations, tests)
+- Re-run until `make ci` passes
+- If failures persist after 3 attempts, ask the user for guidance
+
+### Step 6: Reference quality-pipeline.mdc
+
+Before concluding, ensure the agent has read `quality-pipeline.mdc` for:
+- PHPStan level 9, no baseline
+- CS-Fixer or Pint rules
+- Deptrac layer definitions
+- Infection MSI target (≥70%)
+- GrumPHP task configuration
+- Max 3 retry attempts then ask for help
+
+## Exit Checklist (MANDATORY before concluding)
+
+- [ ] User confirmed or agent detected what's already installed
+- [ ] PHPStan (L9), CS-Fixer/Pint, Deptrac, Infection, GrumPHP installed
+- [ ] Makefile (or Makefile-solution if used) has `make quality`, `make tests`, `make ci`
+- [ ] Config files created: phpstan.neon, .php-cs-fixer.dist.php or pint config, deptrac.yaml, grumphp.yml, infection.json5
+- [ ] `make ci` passes
+- [ ] Agent has read quality-pipeline.mdc
+
+## On Failure
+
+- If composer require fails (e.g. version conflict): ask user to resolve dependency constraints, suggest compatible versions from quality-pipeline.mdc
+- If make ci fails: fix security/quality/test issues, re-run; after 3 attempts, ask user for guidance
+- If GrumPHP fails to install or configure: document manual setup steps, suggest running `make ci` before each commit as fallback
+- If Infection takes too long or times out: suggest lowering mutation counts for initial setup, or running Infection only in CI
+- If stuck after 3 attempts: ask the user for guidance

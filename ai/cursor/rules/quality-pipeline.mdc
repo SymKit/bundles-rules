@@ -1,0 +1,293 @@
+---
+description: "Quality pipeline: make ci/tests/quality, PHPStan L9, Deptrac, GrumPHP (bundle package repos)."
+alwaysApply: false
+globs: Makefile,grumphp.yml,phpstan.neon*,deptrac.yaml,.github/**/*.yml,composer.json
+version: 2.0.0
+---
+
+# Quality Pipeline
+
+## Core Principles
+
+1. **PHPStan level 9, zero baseline** — Highest strictness. Never generate or maintain a baseline. Fix all errors including pre-existing ones in touched files.
+2. **PHP-CS-Fixer or Pint** — Consistent code style. Config committed. Format on save or pre-commit. See `coding-standards.mdc` for the conventions enforced (strict_types, final classes, etc.).
+3. **Deptrac** — Module boundary validation. Layer violation = architectural boundary crossed. Refactor or explicitly allow with documented rationale.
+4. **Infection** — Mutation testing. MSI >= 70%, covered MSI >= 80%. Handle equivalent mutations as false positives. See `testing.mdc` for test conventions.
+5. **GrumPHP** — Pre-commit hook that calls `make quality` (not individual tools). Single source of truth.
+6. **Three Makefile targets only** — `make ci`, `make tests`, `make quality`. All tools are invoked inside these targets. No separate contract for make help, make format, make security-check, etc.; the user may add them if desired.
+7. **make ci = quality + tests** — Full pipeline. Optionally include security-check (composer audit) inside `make ci`. Same commands locally and in CI. **After any implementation, run `make ci`.**
+8. **Max 3 retry attempts** — On failure, try up to 3 times. Then stop and ask for help.
+
+---
+
+## Conventions
+
+### PHPStan Level 9 (Never Baseline)
+
+**Do:**
+
+```yaml
+# phpstan.neon
+parameters:
+    level: 9
+    paths:
+        - src
+    excludePaths:
+        - src/Kernel.php
+```
+
+```php
+declare(strict_types=1);
+
+final readonly class UserService
+{
+    public function __construct(
+        private UserRepository $repository,
+    ) {}
+
+    public function findById(string $id): ?User
+    {
+        return $this->repository->find($id);
+    }
+}
+```
+
+**Don't:**
+
+```yaml
+parameters:
+    level: 5
+    ignoreErrors:
+        - '#Some error#'  # Baseline — never
+
+includes:
+    - phpstan-baseline.neon  # Never create a baseline file
+```
+
+```php
+/** @phpstan-ignore-next-line */
+$foo = $bar;  // Fix the root cause instead
+```
+
+### PHP-CS-Fixer or Pint
+
+**Do:**
+
+```php
+// .php-cs-fixer.dist.php
+return (new PhpCsFixer\Config())
+    ->setRules([
+        '@Symfony' => true,
+        'strict_types' => true,
+        'final_class' => true,
+    ])
+    ->setFinder(
+        PhpCsFixer\Finder::create()
+            ->in('src')
+            ->exclude('var')
+    );
+```
+
+**Don't:**
+
+```bash
+# No code style tool — inconsistent formatting, noisy diffs
+```
+
+### Deptrac for Module Boundaries
+
+**Do:**
+
+```yaml
+# deptrac.yaml
+deptrac:
+    paths:
+        - ./src
+    exclude_files:
+        - '#.*Test\.php$#'
+    layers:
+        - name: Controller
+          collectors:
+              - { type: className, value: 'App\\Controller\\.*' }
+        - name: Handler
+          collectors:
+              - { type: className, value: 'App\\MessageHandler\\.*' }
+        - name: Domain
+          collectors:
+              - { type: directory, value: 'App/Domain/.*' }
+        - name: Infrastructure
+          collectors:
+              - { type: directory, value: 'App/Infrastructure/.*' }
+    ruleset:
+        Controller:
+            - Handler
+            - Domain
+        Handler:
+            - Domain
+            - Infrastructure
+        Domain: []
+        Infrastructure:
+            - Domain
+```
+
+**Don't:**
+
+```yaml
+# No deptrac — layers can depend on anything; coupling grows unnoticed
+# Deptrac runs inside make quality; make ci runs it in CI
+```
+
+### Infection for Mutation Testing
+
+**Do:**
+
+```json5
+// infection.json5
+{
+    "timeout": 10,
+    "source": {
+        "directories": ["src"]
+    },
+    "logs": {
+        "text": "infection.log",
+        "html": "infection-report.html"
+    },
+    "minMsi": 70,
+    "minCoveredMsi": 80
+}
+```
+
+**Don't:**
+
+```json5
+{
+    "minMsi": 0  // No threshold — mutations survive undetected
+}
+```
+
+### GrumPHP Pre-commit (Calls make quality)
+
+**Do:**
+
+```yaml
+# grumphp.yml
+grumphp:
+    tasks:
+        shell:
+            scripts:
+                - 'make ci'
+```
+
+**Don't:**
+
+```yaml
+grumphp:
+    tasks:
+        phpstan: ~
+        phpcs: ~
+        phpunit: ~
+    # Individual tools — diverges from CI pipeline
+```
+
+```yaml
+grumphp:
+    tasks:
+        shell:
+            command: 'make quality'    # Wrong: use scripts, not command
+            threads: max               # Wrong: type error, use null or omit
+```
+
+### Makefile as Abstraction Layer
+
+The Makefile is a **contract** between the boilerplate (skills, agents, rules) and the project. All skills and agents call `make <target>`, never raw tool commands. **Only three targets are part of the contract.** Implementation details (concrete tools) live inside these targets.
+
+**Contract — exactly three targets:**
+
+| Target | Purpose | Contains |
+|--------|---------|----------|
+| `make quality` | All quality checks | Lint, Deptrac, PHPStan, CS-Fixer (or Pint) check. GrumPHP pre-commit calls this. |
+| `make tests` | All tests | PHPUnit, Infection (mutation testing), etc. |
+| `make ci` | Full pipeline after implementation | Runs `make quality` then `make tests`. Optionally composer audit (security-check) at start. **After any implementation, run `make ci`.** |
+
+**Out of scope for the boilerplate:** make help, make install, make format, make security-check, make phpstan, make deptrac, make migrate, etc. If the user wants them, they add them to their Makefile themselves.
+
+**Makefile-solution:** If the project has a root Makefile that `include`s `Makefile-solution`, add or edit these three targets only in `Makefile-solution`, not in the root Makefile. See `AGENTS.md` directive.
+
+**Reference implementation:** See the `quality-install` skill `templates/Makefile` for a concrete example. The rule defines the contract (three targets, semantics); the template provides the implementation (calling phpstan, deptrac, phpunit, infection, etc. inside `quality` and `tests`).
+
+### CI Pipeline (Same as Local)
+
+**Do:**
+
+```yaml
+# .github/workflows/ci.yml
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: composer install --no-interaction
+      - run: make ci
+```
+
+**Don't:**
+
+```yaml
+steps:
+    - run: vendor/bin/phpstan analyse   # Different from local make quality
+    - run: vendor/bin/phpunit           # Not using Makefile — divergence risk
+```
+
+### composer allow-plugins for CI
+
+**Do:**
+
+```json
+{
+    "config": {
+        "allow-plugins": {
+            "phpro/grumphp": true,
+            "infection/extension-installer": true,
+            "symfony/flex": true
+        }
+    }
+}
+```
+
+**Don't:**
+
+```bash
+composer install  # Blocks in CI with interactive prompt for allow-plugins
+```
+
+### Max 3 Retry Attempts
+
+**Do:**
+
+```bash
+# On failure: retry up to 3 times. If still failing, stop and ask for help.
+```
+
+**Don't:**
+
+```bash
+while ! make tests; do sleep 5; done  # Infinite retries mask real issues
+```
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| PHPStan baseline (growing debt) | Never create baseline. Fix every error. Level 9, zero exceptions |
+| Deptrac violations ignored | Layer violation = refactor. Document exceptions in `deptrac.yaml` |
+| Infection MSI below threshold | Enforce `minMsi: 70`, `minCoveredMsi: 80`. Analyze surviving mutants |
+| GrumPHP bypassed with `--no-verify` | CI runs `make ci` anyway. Skipping hooks does not skip CI |
+| GrumPHP misconfiguration | No `threads: max`. Use `scripts:` not `command:`. Test after config changes |
+| CI pipeline diverges from local | Makefile = single source of truth. GrumPHP → `make quality`, CI and post-implementation → `make ci` |
+| No code style tool | PHP-CS-Fixer or Pint. Commit config. Run in CI + pre-commit |
+| No Deptrac | Define layers in `deptrac.yaml`. Run in CI. Fix every violation |
+| Composer `allow-plugins` not set | Configure in `composer.json` > `config`. Always `--no-interaction` |
+| Alpine CI removes make after pecl | `apk del $PHPIZE_DEPS && apk add --no-cache make` |
+| Infinite retries on failure | Max 3 retries then stop and report |

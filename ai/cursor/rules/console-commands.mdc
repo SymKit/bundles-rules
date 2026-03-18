@@ -1,0 +1,206 @@
+---
+description: "Console commands: ProgressBar, SymfonyStyle, scheduling, exit codes, CommandTester."
+alwaysApply: false
+globs: src/**/*.php
+version: 1.7.0
+---
+
+# Console Commands
+
+For Scheduler/RecurringMessage transport, see `messenger.mdc`. For CommandTester test patterns, see `testing.mdc`. For entity persistence patterns, see `doctrine.mdc`.
+
+## Core Principles
+
+1. **Single responsibility** — One command = one action. No god-commands with `--mode` flags.
+2. **SymfonyStyle for IO** — Always use `SymfonyStyle` for consistent output formatting. Never raw `echo` or `OutputInterface`.
+3. **ProgressBar for long operations** — Any batch operation (>100 items) must show progress.
+4. **Exit codes are contracts** — Return `Command::SUCCESS` (0), `Command::FAILURE` (1), or `Command::INVALID` (2). Never `exit()`.
+5. **Thin commands** — Commands parse input and delegate to services. Business logic stays in handlers/services.
+6. **Scheduling via Scheduler component** — Use `#[AsSchedule]` and `RecurringMessage` for periodic tasks. No raw crontabs in docs.
+7. **Lock for non-reentrant commands** — Use `LockFactory` or `#[AsCommand]` with `lock` for commands that must not run concurrently.
+8. **Testable via CommandTester** — Every command has a `CommandTester` test verifying output and exit code.
+
+---
+
+## Conventions
+
+### SymfonyStyle for All Output
+
+**Do:**
+
+```php
+#[AsCommand(name: 'app:import-products', description: 'Import products from CSV')]
+final class ImportProductsCommand extends Command
+{
+    public function __construct(
+        private readonly ProductImporter $importer,
+    ) {
+        parent::__construct();
+    }
+
+    protected function execute(InputInterface $input, OutputInterface $output): int
+    {
+        $io = new SymfonyStyle($input, $output);
+        $io->title('Product Import');
+
+        $result = $this->importer->import($input->getArgument('file'));
+
+        $io->success(sprintf('Imported %d products.', $result->count));
+        return Command::SUCCESS;
+    }
+}
+```
+
+**Don't:**
+
+```php
+protected function execute(InputInterface $input, OutputInterface $output): int
+{
+    echo "Starting import...\n";  // Raw echo — no formatting, no verbosity control
+    $output->writeln('Done');     // Raw OutputInterface — inconsistent styling
+    return 0;                     // Magic number instead of Command::SUCCESS
+}
+```
+
+### ProgressBar for Batch Operations
+
+**Do:**
+
+```php
+$io->progressStart($totalItems);
+foreach ($items as $item) {
+    $this->processor->process($item);
+    $io->progressAdvance();
+}
+$io->progressFinish();
+```
+
+**Don't:**
+
+```php
+foreach ($items as $i => $item) {
+    $this->processor->process($item);
+    echo "\r$i / $total";  // Manual progress — no ETA, no formatting
+}
+```
+
+### Thin Command — Delegate to Services
+
+**Do:**
+
+```php
+protected function execute(InputInterface $input, OutputInterface $output): int
+{
+    $io = new SymfonyStyle($input, $output);
+    try {
+        $this->handler->handle(new ImportCommand($input->getArgument('file')));
+        $io->success('Import completed.');
+        return Command::SUCCESS;
+    } catch (ImportException $e) {
+        $io->error($e->getMessage());
+        return Command::FAILURE;
+    }
+}
+```
+
+**Don't:**
+
+```php
+protected function execute(InputInterface $input, OutputInterface $output): int
+{
+    $file = $input->getArgument('file');
+    $csv = fopen($file, 'r');
+    while (($row = fgetcsv($csv)) !== false) {
+        $product = new Product($row[0], $row[1]);
+        $this->em->persist($product);
+        // Business logic + persistence in command — untestable, unreusable
+    }
+    $this->em->flush();
+    return 0;
+}
+```
+
+### Scheduling with Scheduler Component
+
+**Do:**
+
+```php
+#[AsSchedule('default')]
+final class AppScheduleProvider implements ScheduleProviderInterface
+{
+    public function getSchedule(): Schedule
+    {
+        return (new Schedule())
+            ->add(RecurringMessage::every('1 hour', new CleanExpiredTokensMessage()))
+            ->add(RecurringMessage::cron('0 2 * * *', new GenerateDailyReportMessage()));
+    }
+}
+```
+
+**Don't:**
+
+```bash
+# Raw crontab — no version control, no monitoring, no retry
+*/5 * * * * cd /app && php bin/console app:clean-tokens
+```
+
+### Lock for Non-Reentrant Commands
+
+**Do:**
+
+```php
+use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Lock\LockFactory;
+
+protected function execute(InputInterface $input, OutputInterface $output): int
+{
+    $lock = $this->lockFactory->createLock('app:import-products');
+    if (!$lock->acquire()) {
+        $io->warning('Command already running.');
+        return Command::SUCCESS;
+    }
+    try {
+        // ... processing
+        return Command::SUCCESS;
+    } finally {
+        $lock->release();
+    }
+}
+```
+
+### Testing with CommandTester
+
+**Do:**
+
+```php
+public function test_import_command_succeeds(): void
+{
+    $tester = new CommandTester($this->command);
+    $tester->execute(['file' => '/tmp/test.csv']);
+
+    self::assertSame(Command::SUCCESS, $tester->getStatusCode());
+    self::assertStringContainsString('Imported', $tester->getDisplay());
+}
+
+public function test_import_command_fails_on_missing_file(): void
+{
+    $tester = new CommandTester($this->command);
+    $tester->execute(['file' => '/nonexistent']);
+
+    self::assertSame(Command::FAILURE, $tester->getStatusCode());
+}
+```
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| Business logic in command | Delegate to service/handler. Command only parses input |
+| Raw `echo` or `OutputInterface` | `SymfonyStyle` for consistent formatting and verbosity |
+| No progress indicator on batch | `$io->progressStart/Advance/Finish` for >100 items |
+| `exit(1)` instead of return code | Return `Command::SUCCESS`, `FAILURE`, or `INVALID` |
+| Concurrent runs of non-idempotent command | `LockFactory` or Symfony Lock component |
+| Crontab outside version control | Scheduler component with `#[AsSchedule]` |
+| No command tests | `CommandTester` verifying exit code + output |

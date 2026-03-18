@@ -1,0 +1,298 @@
+---
+description: "Symfony native API: MapRequestPayload, MapQueryString, Serializer groups, RFC 7807 (bundle controllers)."
+alwaysApply: false
+globs: src/**/*.php
+version: 1.7.0
+---
+
+# API (Symfony Native — without API Platform)
+
+> **Bundles** — Applies when the bundle exposes HTTP controllers. If the host uses API Platform for those endpoints, prefer `api-platform.mdc`. For DTO conventions, see `dto.mdc`.
+
+## Core Principles
+
+1. **MapRequestPayload for input** — Symfony 6.3+ attribute automates JSON → DTO → validation. No manual `$request->getContent()` + deserialize.
+2. **MapQueryString for filters** — Query parameters mapped to typed filter DTOs. No `$request->query->get()`.
+3. **MapQueryParameter for scalars** — Single query params like `page`, `limit` mapped directly to controller arguments.
+4. **Serializer groups for output** — Control exposed fields per operation with `#[Groups]`. Convention: `<resource>:<action>` (e.g. `user:read`, `user:list`). API Platform projects use 3-segment groups instead — see `api-platform.mdc`.
+5. **Problem Details RFC 7807 for errors** — Symfony's native error handler returns structured JSON errors. Configure via `framework.exceptions`. See `error-handling.mdc` for the full ExceptionListener pattern.
+6. **DTOs for input AND output** — Never serialize Doctrine entities directly. Input DTOs for write, output DTOs or entity-with-groups for read.
+7. **Controller stays anemic** — Receive DTO, dispatch to handler/service, return response. No business logic. See `coding-standards.mdc` for the canonical Do/Don't and `dto.mdc > DTO to Entity Mapping`.
+8. **Custom normalizers with `getSupportedTypes()`** — Value Objects (Money, Address) need dedicated normalizers. Always implement `getSupportedTypes()` for cache. See `serializer.mdc` for context builders and advanced normalizer patterns.
+9. **Content negotiation** — Return format based on `Accept` header. JSON default for APIs. Configure `framework.request.formats`.
+10. **Versioning via route prefix** — `/api/v1/...`. Never break existing clients.
+
+---
+
+## Conventions
+
+### MapRequestPayload (POST/PUT/PATCH)
+
+**Do:**
+
+```php
+#[Route('/api/v1/users', methods: ['POST'])]
+public function create(
+    #[MapRequestPayload] CreateUserPayload $payload,
+    CreateUserHandler $handler,
+): JsonResponse {
+    $user = $handler($payload);
+
+    return $this->json($user, Response::HTTP_CREATED, [], ['groups' => 'user:read']);
+}
+```
+
+**Don't:**
+
+```php
+public function create(Request $request): JsonResponse
+{
+    $data = json_decode($request->getContent(), true); // Manual parsing
+    $email = $data['email'] ?? null;                     // No validation
+    // ...
+}
+```
+
+### MapQueryString (GET Filters)
+
+**Do:**
+
+```php
+#[Route('/api/v1/products', methods: ['GET'])]
+public function list(
+    #[MapQueryString] ProductFilter $filter,
+    ProductRepositoryInterface $repository,
+): JsonResponse {
+    $products = $repository->findByFilter($filter);
+
+    return $this->json($products, Response::HTTP_OK, [], ['groups' => 'product:list']);
+}
+```
+
+> See `dto.mdc > Query Filter DTO` for the `ProductFilter` pattern.
+
+**Don't:**
+
+```php
+public function list(Request $request): JsonResponse
+{
+    $page = $request->query->getInt('page', 1);
+    $search = $request->query->get('q');  // No length constraint, no type safety
+}
+```
+
+### MapQueryParameter (Scalar Query Params)
+
+**Do:**
+
+```php
+#[Route('/api/v1/orders', methods: ['GET'])]
+public function list(
+    #[MapQueryParameter] int $page = 1,
+    #[MapQueryParameter] int $limit = 20,
+    #[MapQueryParameter] ?string $status = null,
+): JsonResponse {
+    // $page and $limit are typed and validated by PHP type system
+}
+```
+
+**Don't:** Use `MapQueryParameter` for complex filters with multiple related fields — use `MapQueryString` with a filter DTO instead.
+
+### Serialization Groups
+
+**Do:**
+
+```php
+final readonly class UserResponse
+{
+    public function __construct(
+        #[Groups(['user:read', 'user:list'])]
+        public string $id,
+
+        #[Groups(['user:read', 'user:list'])]
+        public string $email,
+
+        #[Groups(['user:read'])]
+        public ?string $phone = null,
+
+        #[Groups(['user:read'])]
+        public \DateTimeImmutable $createdAt,
+    ) {}
+}
+```
+
+```php
+return $this->json($user, 200, [], ['groups' => 'user:read']);
+```
+
+**Don't:**
+
+```php
+#[Groups(['read'])]  // Too generic — no resource or operation distinction
+public string $email;
+```
+
+### Problem Details (RFC 7807) Error Handling
+
+**Do:**
+
+```yaml
+# config/packages/framework.yaml
+framework:
+    exceptions:
+        Symfony\Component\HttpKernel\Exception\UnprocessableEntityHttpException:
+            status_code: 422
+        App\Exception\OrderNotFoundException:
+            status_code: 404
+```
+
+Symfony 6.3+ returns Problem Details automatically when `Accept: application/json`:
+
+```json
+{
+    "type": "https://tools.ietf.org/html/rfc2616#section-10",
+    "title": "An error occurred",
+    "status": 422,
+    "detail": "email: This value is not a valid email address."
+}
+```
+
+**Don't:**
+
+```php
+return $this->json(['error' => $message, 'code' => $code], 400);
+// Non-standard format — every endpoint different
+```
+
+### Custom Normalizer for Value Objects
+
+**Do:**
+
+```php
+final class MoneyNormalizer implements NormalizerInterface
+{
+    public function normalize(mixed $object, ?string $format = null, array $context = []): array
+    {
+        return ['amount' => $object->getAmount(), 'currency' => $object->getCurrencyCode()];
+    }
+
+    public function supportsNormalization(mixed $data, ?string $format = null, array $context = []): bool
+    {
+        return $data instanceof Money;
+    }
+
+    public function getSupportedTypes(?string $format): array
+    {
+        return [Money::class => true];
+    }
+}
+```
+
+**Don't:**
+
+```php
+// Missing getSupportedTypes() — supportsNormalization() called on
+// EVERY normalizer for EVERY sub-object → catastrophic perf
+```
+
+### Circular Reference Prevention
+
+**Do:**
+
+```php
+// Option 1: Use output DTOs (recommended) — you control the shape
+final readonly class OrderResponse
+{
+    public function __construct(
+        public string $id,
+        public string $customerName,  // Flat — no circular reference possible
+        public int $totalInCents,
+    ) {}
+}
+
+// Option 2: Serialization groups (if returning entities)
+#[Groups(['order:read'])]
+private string $title;
+
+#[Groups(['order:read'])]
+#[MaxDepth(1)]
+private User $author;  // Stops recursion at depth 1
+```
+
+**Don't:**
+
+```php
+return $this->json($order);
+// Serializes all relations recursively → infinite loop → 500 error
+```
+
+### Streaming Large Responses
+
+**Do:**
+
+```php
+return new StreamedJsonResponse(function () {
+    yield from $this->orderRepository->streamAll();
+});
+```
+
+**Don't:**
+
+```php
+$data = $this->serializer->serialize($this->repo->findAll(), 'json');
+// Loads entire dataset into memory — OOM on large collections
+```
+
+### Error Responses with Custom Exceptions
+
+**Do:**
+
+```php
+final class OrderNotFoundException extends NotFoundHttpException
+{
+    public function __construct(string $orderId)
+    {
+        parent::__construct(sprintf('Order "%s" not found.', $orderId));
+    }
+}
+```
+
+```php
+// In handler/service
+throw new OrderNotFoundException($orderId);
+// Returns 404 with Problem Details format automatically
+```
+
+**Don't:**
+
+```php
+if (!$order) {
+    return $this->json(['error' => 'not found'], 404); // In controller — logic leak
+}
+```
+
+### 400 vs 422 Distinction
+
+| Code | When | Cause |
+|------|------|-------|
+| **400** Bad Request | JSON is malformed | Syntax error, missing Content-Type |
+| **422** Unprocessable Entity | JSON is valid but data violates constraints | Email invalid, field too long |
+
+> `#[MapRequestPayload]` handles this automatically: malformed JSON → 400, validation failure → 422.
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| Manual `json_decode` + validate | Use `#[MapRequestPayload]`. Automatic deserialization + validation |
+| `$request->query->get()` for filters | Use `#[MapQueryString]` with typed filter DTO |
+| Entity serialized directly | Output DTOs or entity with strict `#[Groups]`. See `dto.mdc` |
+| Inconsistent error format | Problem Details RFC 7807 via `framework.exceptions` config |
+| Missing `getSupportedTypes()` on normalizer | Required since Symfony 6.3. Without it, perf catastrophe |
+| Generic groups (`read`/`write`) | Convention: `<resource>:<action>` (e.g. `user:read`, `order:list`) |
+| No content negotiation | Configure `framework.request.formats`. Return JSON for API clients |
+| All logic in controller | Controller receives DTO, dispatches to handler. See `dto.mdc` |
+| `MapQueryString` for single scalar param | Use `#[MapQueryParameter]` for individual typed params |
+| Circular reference on entity serialization | Use output DTOs (flat structure) or `#[MaxDepth]` with groups |

@@ -21,6 +21,7 @@ final class EditorConfigTest extends TestCase
         self::assertSame('.cursor/skills', $config->skillsDir);
         self::assertSame('mdc', $config->fileExtension);
         self::assertSame($converter, $config->contentConverter);
+        self::assertNull($config->agentsDir);
     }
 
     #[Test]
@@ -29,5 +30,14 @@ final class EditorConfigTest extends TestCase
         $config = new EditorConfig('.windsurf/rules', '.windsurf/skills', 'md', null);
 
         self::assertNull($config->contentConverter);
+        self::assertNull($config->agentsDir);
+    }
+
+    #[Test]
+    public function constructionWithAgentsDir(): void
+    {
+        $config = new EditorConfig('.cursor/rules', '.cursor/skills', 'mdc', new IdentityConverter(), '.cursor/agents');
+
+        self::assertSame('.cursor/agents', $config->agentsDir);
     }
 }

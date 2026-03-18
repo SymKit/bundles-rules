@@ -1,0 +1,342 @@
+---
+description: "PHP 8.2+ coding: strict_types, final, SOLID, DI, TaggedIterator, iterables, no dump/dd."
+alwaysApply: false
+globs: src/**/*.php,tests/**/*.php
+version: 1.7.0
+---
+
+# Coding Standards
+
+## Core Principles
+
+1. **PHP 8.2+ only** — Use modern syntax: readonly, enums, match, named arguments.
+2. **Strict by default** — `declare(strict_types=1)` in every PHP file.
+3. **Final by default** — Classes are final unless explicitly designed for extension.
+4. **SOLID mandatory** — Single responsibility, dependency inversion, interface segregation.
+5. **Thin boundaries** — Controllers, entities, and event classes contain no business logic. See `dto.mdc` for DTO mapping patterns.
+6. **Constructor injection only** — All dependencies via constructor. No service locator, no setter injection.
+7. **Interface-driven DI** — Type-hint interfaces in constructors (DIP). Bind implementations via alias or `#[AsAlias]`.
+8. **Explicit over implicit** — Use yield/iterables when returning collections; type `iterable` in interfaces (LSP).
+9. **Production-safe** — No `dump()` or `dd()` in committed code.
+10. **Internationalization** — See `i18n.mdc` for TranslatableMessage, ICU, semantic keys.
+11. **Observability** — See `observability.mdc` for structured logging, LogSubscriber, Monolog.
+
+---
+
+## Conventions
+
+### Strict Types
+
+**Do:**
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Service;
+
+final readonly class OrderCalculator
+{
+    public function calculate(float $amount, int $quantity): float
+    {
+        return $amount * $quantity;
+    }
+}
+```
+
+**Don't:**
+
+```php
+<?php
+
+namespace App\Service;
+
+class OrderCalculator
+{
+    public function calculate($amount, $quantity)
+    {
+        return $amount * $quantity;
+    }
+}
+```
+
+### Final Classes with Constructor Promotion
+
+**Do:**
+
+```php
+final readonly class PlaceOrderHandler
+{
+    public function __construct(
+        private OrderRepositoryInterface $repository,
+        private EventBusInterface $bus,
+    ) {}
+}
+```
+
+**Don't:**
+
+```php
+class PlaceOrderHandler
+{
+    private OrderRepositoryInterface $repository;
+
+    public function __construct(OrderRepositoryInterface $repository)
+    {
+        $this->repository = $repository;
+    }
+}
+```
+
+### Service Container — Interface + Alias
+
+**Do:**
+
+```php
+// Domain layer — depends on interface
+public function __construct(
+    private readonly PaymentGatewayInterface $gateway,
+) {}
+```
+
+```yaml
+# config/services/billing.yaml
+services:
+  App\Billing\Contract\PaymentGatewayInterface:
+    alias: App\Billing\Infrastructure\StripePaymentGateway
+```
+
+Or with attribute (Symfony 6.1+):
+
+```php
+#[AsAlias(public: true)]
+final readonly class StripePaymentGateway implements PaymentGatewayInterface {}
+```
+
+**Don't:**
+
+```php
+public function __construct(
+    private ContainerInterface $container,
+) {}
+
+public function handle(): void
+{
+    $gw = $this->container->get(PaymentGatewayInterface::class);
+}
+```
+
+### Service Container — TaggedIterator / AutowireIterator
+
+Use `#[TaggedIterator]` or `#[AutowireIterator]` for strategy/plugin patterns (Open/Closed principle).
+
+**Do:**
+
+```php
+use Symfony\Component\DependencyInjection\Attribute\TaggedIterator;
+
+final readonly class TaxCalculator
+{
+    public function __construct(
+        #[TaggedIterator('app.tax_strategy')]
+        private iterable $strategies,
+    ) {}
+
+    public function calculate(Order $order): int
+    {
+        foreach ($this->strategies as $strategy) {
+            if ($strategy->supports($order)) {
+                return $strategy->compute($order);
+            }
+        }
+        return 0;
+    }
+}
+```
+
+```php
+use Symfony\Component\DependencyInjection\Attribute\AsTaggedItem;
+
+#[AsTaggedItem('app.tax_strategy')]
+final readonly class VatTaxStrategy implements TaxStrategyInterface {}
+```
+
+**Don't:**
+
+```php
+final class TaxCalculator
+{
+    public function __construct(
+        private TaxStrategyA $a,
+        private TaxStrategyB $b,
+    ) {}
+}
+```
+
+### Service Container — ResetInterface for Stateful Services
+
+Services in long-running processes (FrankenPHP, Swoole, workers) must not leak state between requests.
+
+**Do:**
+
+```php
+use Symfony\Contracts\Service\ResetInterface;
+
+final class InMemoryMetricsCollector implements ResetInterface
+{
+    private array $counters = [];
+
+    public function increment(string $key): void
+    {
+        $this->counters[$key] = ($this->counters[$key] ?? 0) + 1;
+    }
+
+    public function reset(): void
+    {
+        $this->counters = [];
+    }
+}
+```
+
+**Don't:** Store user/request state in service properties without `ResetInterface`.
+
+### Service Container — Lazy Services for Heavy Dependencies
+
+See `doctrine.mdc` > Lazy Objects for Doctrine-specific lazy patterns and serialization caveats.
+
+**Do:**
+
+```php
+use Symfony\Component\DependencyInjection\Attribute\Autoconfigure;
+
+#[Autoconfigure(lazy: true)]
+final readonly class HeavyPdfGenerator implements PdfGeneratorInterface
+{
+    // Instantiated only on first method call
+}
+```
+
+**Don't:** Eagerly instantiate heavy services (HTTP clients, PDF generators) that are used in rare code paths.
+
+### No Business Logic in Controllers
+
+**Do:**
+
+```php
+final class OrderController extends AbstractController
+{
+    public function __construct(
+        private CreateOrderHandler $handler,
+    ) {}
+
+    #[Route('/orders', methods: ['POST'])]
+    public function create(Request $request): JsonResponse
+    {
+        $this->handler->__invoke(new CreateOrder(
+            userId: $request->get('user_id'),
+            items: $request->get('items'),
+        ));
+        return new JsonResponse(['status' => 'created'], 201);
+    }
+}
+```
+
+**Don't:** Put domain logic, persistence calls, or side effects in controllers. See `dto.mdc > DTO to Entity Mapping` for where mapping belongs.
+
+### Iterables — Use `iterable` in Interfaces (LSP)
+
+**Do:**
+
+```php
+interface InvoiceLineRepositoryInterface
+{
+    /** @return iterable<int, InvoiceLineDto> */
+    public function streamAllForExport(): iterable;
+}
+```
+
+**Don't:**
+
+```php
+interface InvoiceLineRepositoryInterface
+{
+    /** @return array<int, InvoiceLineDto> */
+    public function streamAllForExport(): array;
+}
+```
+
+### Iterables — Yield and Batch Principles
+
+For batch processing conventions (`detach()`, `flush()+clear()`, `toIterable`), see `doctrine.mdc`. Yield immutable DTOs from repository iterators. Never `getResult()` on large queries.
+
+### Iterables — IteratorAggregate for Business Collections
+
+**Do:**
+
+```php
+/** @implements \IteratorAggregate<int, CartItem> */
+final class Cart implements \IteratorAggregate
+{
+    /** @var list<CartItem> */
+    private array $items = [];
+
+    public function getIterator(): \ArrayIterator
+    {
+        return new \ArrayIterator($this->items);
+    }
+}
+```
+
+### Iterables — yield from for Multi-Source Streams
+
+**Do:**
+
+```php
+/** @return \Generator<int, ProductDto> */
+public function streamAll(): \Generator
+{
+    yield from $this->streamFromDatabase();
+    yield from $this->streamFromApi();
+}
+```
+
+### No dump() or dd()
+
+**Do:**
+
+```php
+$this->logger->debug('Order created', [
+    'order_id' => $order->getId()->toString(),
+    'user_id' => $user->getId()->toString(),
+]);
+```
+
+**Don't:**
+
+```php
+dump($order);
+dd($order);
+```
+
+### Internationalization & Observability
+
+For translation conventions (semantic keys, ICU, TranslatableMessage), see `i18n.mdc`.
+
+For logging conventions (structured logging, LogSubscriber, Monolog channels, PII masking), see `observability.mdc`.
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| Missing `strict_types` | Add `declare(strict_types=1)` in every file. Enforce via CS-Fixer |
+| Logic in controllers | Controllers only parse input, dispatch commands, return responses |
+| Logic in event classes | Events are DTOs. All logic in event handlers |
+| Non-rewindable generator reused | Consume generator once. Recreate or `iterator_to_array()` if needed |
+| `toIterable()` without `detach()`/`clear()` | `detach()` each item or `clear()` every 500–1000 items |
+| `getResult()` on large queries | Use `toIterable()` + `yield`. Type `iterable` in interface |
+| TaggedIterator without interface | All tagged services must share a common interface |
+| ContainerInterface/ParameterBag in domain | Inject explicit deps via constructor. Options DTO for config |
+| `dump()`/`dd()` in committed code | Use structured logging. Pre-commit hook to catch |

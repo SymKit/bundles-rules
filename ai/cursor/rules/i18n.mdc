@@ -1,0 +1,193 @@
+---
+description: "i18n: TranslatableMessage, ICU MessageFormat, semantic keys, XLIFF in bundle translations/."
+alwaysApply: false
+globs: src/**/*.php,translations/**/*.xlf,templates/**/*.twig
+version: 1.7.0
+---
+
+# Internationalization
+
+For logging and observability conventions, see `observability.mdc`.
+
+## Core Principles
+
+1. **No TranslatorInterface in domain** — Domain returns `TranslatableMessage`; resolution happens at the boundary (controller, serializer, event subscriber).
+2. **ICU MessageFormat everywhere** — Use `messages+intl-icu.*.yaml` for pluralization, gender, number formatting. Unicode standard.
+3. **Semantic keys, never magic strings** — Translation keys live in Enums or constants classes. Format: `domain.context.key`.
+4. **One catalogue per bounded context** — Split translation files by domain to reduce merge conflicts.
+5. **Zero HTML in translation values** — Text-only translations. Assemble HTML in Twig templates. See `twig.mdc` for template conventions.
+6. **Resolution at the boundary** — Translate in event subscribers, serializers, or controllers — never in handlers.
+7. **Locale-aware formatting** — Use `IntlDateFormatter`, `NumberFormatter`, or Twig `format_*` filters for dates, numbers, and currencies. Never hardcode format strings.
+8. **Missing translation detection** — Enable `framework.translator.logging: true` in dev. Run `translation:debug` per domain in CI to catch missing keys.
+
+---
+
+## Conventions
+
+### TranslatableMessage in Domain
+
+Domain code expresses *what* happened. The boundary decides *how* to display it.
+
+**Do:**
+
+```php
+use Symfony\Contracts\Translation\TranslatableMessage;
+
+final class InsufficientBalanceException extends \DomainException
+{
+    public function __construct(
+        public readonly TranslatableMessage $translatableMessage,
+    ) {
+        parent::__construct($translatableMessage->getMessage());
+    }
+}
+```
+
+```php
+throw new InsufficientBalanceException(
+    new TranslatableMessage('billing.account.error.insufficient_balance', [
+        'min' => $minBalance,
+        'current' => $balance,
+    ]),
+);
+```
+
+**Don't:**
+
+```php
+final readonly class CreateInvoiceHandler
+{
+    public function __construct(private TranslatorInterface $translator) {}
+
+    public function __invoke(CreateInvoice $cmd): void
+    {
+        $msg = $this->translator->trans('billing.error.insufficient'); // Domain coupled to locale
+    }
+}
+```
+
+### Semantic Translation Keys via Enum
+
+**Do:**
+
+```php
+enum TranslationKeys: string
+{
+    case BILLING_INVOICE_NOT_FOUND = 'billing.invoice.error.not_found';
+    case BILLING_INSUFFICIENT_BALANCE = 'billing.account.error.insufficient_balance';
+    case ONBOARDING_STEP_LABEL = 'onboarding.step.label';
+}
+```
+
+**Don't:**
+
+```php
+throw new \RuntimeException('The invoice was not found'); // Magic string, untraceable
+$this->translator->trans('not found');                     // No domain, no context
+```
+
+### ICU MessageFormat for Pluralization and Gender
+
+**Do:**
+
+```yaml
+# translations/billing+intl-icu.en.yaml
+billing.invoice.count: >-
+  {count, plural,
+    =0 {No invoices}
+    one {# invoice}
+    other {# invoices}
+  }
+billing.greeting: >-
+  {gender, select,
+    female {Dear Ms. {name}}
+    male {Dear Mr. {name}}
+    other {Dear {name}}
+  }
+```
+
+**Don't:**
+
+```yaml
+billing.invoice.count: "%count% invoice(s)"
+```
+
+### Translation Catalogues per Domain
+
+**Do:**
+
+```
+translations/
+  messages+intl-icu.fr.yaml
+  validators+intl-icu.fr.yaml
+  billing+intl-icu.fr.yaml
+  onboarding+intl-icu.fr.yaml
+```
+
+**Don't:**
+
+```
+translations/
+  messages.fr.yaml   # Single monolithic file, constant merge conflicts
+```
+
+### Zero HTML in Translation Files
+
+**Do:**
+
+```yaml
+billing.cta.pay: "Pay {amount}"
+```
+
+```twig
+<a href="{{ path('payment') }}">{{ 'billing.cta.pay'|trans({'amount': amount}) }}</a>
+```
+
+**Don't:**
+
+```yaml
+billing.cta.pay: "<a href='/pay'>Pay {amount}</a>"  # XSS vector
+```
+
+### Resolution at the Boundary
+
+**Do:**
+
+```php
+$translated = $exception->getTranslatableMessage()->trans($this->translator);
+
+// Twig: resolve at render time
+{{ 'billing.cta.confirm'|trans({'amount': amount}) }}
+```
+
+**Don't:**
+
+```php
+$this->translator->trans('billing.error.not_found'); // In Handler — useless in CLI/cron
+```
+
+### Testing — Assert on Keys, Not Translated Text
+
+**Do:**
+
+```php
+$this->expectException(InsufficientBalanceException::class);
+$this->expectExceptionMessage('billing.account.error.insufficient_balance');
+```
+
+**Don't:**
+
+```php
+$this->expectExceptionMessage('Solde insuffisant'); // Breaks on locale/wording change
+```
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| `TranslatorInterface` in domain | Return `TranslatableMessage`. Resolve at boundary |
+| Magic string translation keys | Centralize in Enum/constants class. PHPStan tracks unused |
+| Missing ICU format (`%count% invoice(s)`) | `*+intl-icu.*.yaml` files with ICU MessageFormat syntax |
+| HTML in translation values | Text-only translations. Assemble HTML in Twig |

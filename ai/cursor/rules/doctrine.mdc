@@ -1,0 +1,266 @@
+---
+description: "Doctrine in bundles: entities, mapping (XML), repos — only when the bundle persists data."
+alwaysApply: false
+globs: src/**/*.php,config/**/*.xml
+version: 1.7.0
+---
+
+# Doctrine
+
+Use this rule **when the bundle defines entities/mapping**. Map entities in XML under `config/` when possible; make entity/repository classes **configurable** (see `symfony-bundle.mdc`).
+
+## Core Principles
+
+1. **Rich entities** — Domain logic lives in entities. Entities enforce invariants and encapsulate behavior.
+2. **Value Objects** — Use embeddable Value Objects for reusable domain concepts (Money, Address, Email).
+3. **Repository pattern** — Interface in domain, Doctrine implementation in infrastructure.
+4. **Explicit QueryBuilder** — No `findBy`, `findOneBy`, or `findAll`. Build queries explicitly.
+5. **UUID v7 as public identifier** — Use UUID v7 for external IDs. Keep auto-increment internal.
+6. **N+1 prevention** — Use join fetch or batch loading. Never lazy-load collections in loops.
+7. **Batch processing** — Use `toIterable()` with detach/clear for large datasets. No `getResult()` on big queries.
+8. **Lazy Objects** — Use `lazy: true` in DI for heavy services. Program to interfaces. Never serialize lazy objects.
+9. **Migrations always reviewed** — Every migration reviewed for correctness and reversibility.
+10. **No EntityManager in controllers** — Controllers never inject or use EntityManager.
+
+---
+
+## Conventions
+
+### Rich Entities with Value Objects
+
+**Do:**
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace App\Entity;
+
+use App\ValueObject\Money;
+use App\ValueObject\Email;
+
+#[ORM\Entity]
+final class Order
+{
+    #[ORM\Id]
+    #[ORM\Column(type: 'uuid')]
+    private string $id;
+
+    #[ORM\Embedded(class: Money::class)]
+    private Money $total;
+
+    #[ORM\Embedded(class: Email::class)]
+    private Email $customerEmail;
+
+    private OrderStatus $status = OrderStatus::DRAFT;
+
+    /** @var list<OrderLine> */
+    #[ORM\OneToMany(targetEntity: OrderLine::class, mappedBy: 'order', cascade: ['persist'])]
+    private array $lines = [];
+
+    public function addLine(string $sku, int $quantity, Money $unitPrice): void
+    {
+        if ($quantity <= 0) {
+            throw new \DomainException('Quantity must be positive');
+        }
+        $this->lines[] = new OrderLine($this, $sku, $quantity, $unitPrice);
+    }
+
+    public function place(): void
+    {
+        if ($this->status !== OrderStatus::DRAFT) {
+            throw new \DomainException('Only draft orders can be placed');
+        }
+        if (empty($this->lines)) {
+            throw new \DomainException('Order must have at least one line');
+        }
+        $this->status = OrderStatus::PLACED;
+    }
+}
+```
+
+**Don't:**
+
+```php
+final class Order
+{
+    public string $status;
+    public array $lines;
+    public float $totalAmount;  // Primitive instead of Value Object
+    public string $totalCurrency;
+}
+```
+
+### Value Objects — Embeddable
+
+**Do:**
+
+```php
+#[ORM\Embeddable]
+final readonly class Money
+{
+    public function __construct(
+        #[ORM\Column(type: 'integer')]
+        public int $amount,
+        #[ORM\Column(type: 'string', length: 3)]
+        public string $currency,
+    ) {
+        if ($amount < 0) {
+            throw new \DomainException('Amount cannot be negative');
+        }
+    }
+
+    public function add(self $other): self
+    {
+        if ($this->currency !== $other->currency) {
+            throw new \DomainException('Cannot add different currencies');
+        }
+        return new self($this->amount + $other->amount, $this->currency);
+    }
+}
+```
+
+**Don't:** Represent money as `float $amount` + `string $currency` on the entity.
+
+### Repository Interface + Doctrine Implementation
+
+**Do:**
+
+```php
+// src/Domain/Order/OrderRepositoryInterface.php
+interface OrderRepositoryInterface
+{
+    public function save(Order $order): void;
+    public function find(OrderId $id): ?Order;
+    /** @return \Iterator<int, Order> */
+    public function findPendingOrders(): \Iterator;
+}
+
+// src/Infrastructure/Persistence/DoctrineOrderRepository.php
+final class DoctrineOrderRepository implements OrderRepositoryInterface
+{
+    public function __construct(
+        private EntityManagerInterface $em,
+    ) {}
+
+    public function findPendingOrders(): \Iterator
+    {
+        $qb = $this->em->createQueryBuilder()
+            ->select('o')->from(Order::class, 'o')
+            ->where('o.status = :status')
+            ->setParameter('status', OrderStatus::PENDING);
+        yield from $qb->getQuery()->toIterable();
+    }
+}
+```
+
+**Don't:**
+
+```php
+return $this->repository->findBy(['status' => 'pending']);
+$order = $this->entityManager->getRepository(Order::class)->find($id);
+```
+
+### Explicit QueryBuilder
+
+**Do:** Named query methods with explicit `createQueryBuilder`, parameters, and ordering.
+
+**Don't:** `$this->findBy(['user' => $user, 'status' => $status])` — hides query, no type-safety, no optimization.
+
+### UUID v7 as Public Identifier
+
+**Do:** `$this->id = (string) Uuid::v7()` in entity constructor. `#[ORM\Column(type: 'uuid')]` for the ID column.
+
+**Don't:** `#[ORM\GeneratedValue(strategy: 'AUTO')]` with integer — enumeration attacks, leaks info.
+
+### N+1 Prevention
+
+**Do:**
+
+```php
+$qb = $this->createQueryBuilder('o')
+    ->innerJoin('o.lines', 'l')
+    ->addSelect('l')
+    ->where('o.status = :status')
+    ->setParameter('status', OrderStatus::PENDING);
+```
+
+**Don't:**
+
+```php
+$orders = $this->findBy(['status' => OrderStatus::PENDING]);
+foreach ($orders as $order) {
+    foreach ($order->getLines() as $line) {
+        $line->getSku();
+    }
+}
+```
+
+### Batch Processing with toIterable + Detach
+
+**Do:**
+
+```php
+/** @return \Iterator<int, Order> */
+public function streamAllOrders(): \Iterator
+{
+    $qb = $this->createQueryBuilder('o')->orderBy('o.id', 'ASC');
+    yield from $qb->getQuery()->toIterable();
+}
+
+// In consumer:
+$count = 0;
+foreach ($repository->streamAllOrders() as $order) {
+    $order->archive();
+    if (++$count % 500 === 0) {
+        $this->em->flush();
+        $this->em->clear();
+    }
+}
+$this->em->flush();
+$this->em->clear();
+```
+
+**Don't:**
+
+```php
+$orders = $this->createQueryBuilder('o')->getQuery()->getResult();
+foreach ($orders as $order) { /* OOM risk */ }
+```
+
+### Lazy Objects — Interface-Driven, DI Only
+
+For heavy, rarely used services: `lazy: true` in DI or `#[Autoconfigure(lazy: true)]`. Always program to interfaces — consumer is unaware of lazy behavior. See `coding-standards.mdc` > Lazy Services for DI patterns.
+
+**Do:** `#[Autoconfigure(lazy: true)]` on implementation + interface alias. Consumer type-hints interface.
+
+**Don't:** Serialize lazy objects for API (triggers full init). Use lazy on collection elements (N+1).
+
+### No EntityManager in Controllers
+
+**Do:** Controllers inject handlers/command bus only. Never `EntityManagerInterface`.
+
+**Don't:** `$this->em->persist($order); $this->em->flush();` inside a controller action.
+
+### Migrations Always Reviewed
+
+Review SQL before applying. Ensure reversibility. Test on staging data. Never auto-apply without review.
+
+---
+
+## Pitfalls
+
+| Pitfall | Fix |
+|---------|-----|
+| N+1 queries (lazy-load in loops) | `leftJoin` + `addSelect`. Verify with Symfony Profiler |
+| `getResult()` on large datasets | `toIterable()` + `detach()` or `clear()` every 500 items |
+| `findBy`/`findOneBy` magic methods | Explicit QueryBuilder methods. `SELECT 1 LIMIT 1` for existence |
+| `#[Assert\...]` on entities | Validate DTOs/Commands only (see `dto.mdc`). Entities use domain logic + VOs |
+| Serializing entities directly | Map to DTOs first (see `api.mdc`). Normalizers need `CacheableSupportsMethodInterface` |
+| Serializing lazy objects | Map to DTO before serialization. Never expose lazy via API |
+| Lazy objects on collections (N+1) | Eager loading for lists. Lazy for single deep graphs only |
+| Auto-increment IDs in APIs | UUID v7 for all public identifiers |
+| EntityManager in controllers | Repositories own queries. Controllers dispatch commands |
+| Unreviewed migrations | Review SQL diff. Check indexes, constraints, reversibility |
+| Unique index + NULL in PostgreSQL | Partial index `WHERE col IS NOT NULL` or non-nullable |
