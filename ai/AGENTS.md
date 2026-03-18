@@ -10,7 +10,7 @@
 - If `Makefile-solution` exists, edit only it for make targets.
 - **Bundle layer order** — Extension/config → services → public Contract/events → tests → optional Doctrine/API/UX/Flex (see `architecture.mdc`, `symfony-bundle.mdc`).
 - **Challenge everything** — Value, architecture, risk. Propose alternatives before implementing.
-- Without skills, follow rules from index below.
+- Skills are under `.cursor/skills/` (feature, bug-fix, etc.); without invoking a skill, follow the rules index below.
 - Bundle root = directory of the package `composer.json` (not the host application).
 - **On PHP changes**, apply: `symfony-bundle`, `coding-standards`, `dto`, `testing`, `security` as relevant.
 - When reading a rule, challenge if principles apply.

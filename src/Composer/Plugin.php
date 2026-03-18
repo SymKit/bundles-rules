@@ -11,14 +11,12 @@ use Composer\Plugin\Capable;
 use Composer\Plugin\PluginInterface;
 use Composer\Script\Event;
 use Composer\Script\ScriptEvents;
-use Symkit\BundleAiKit\Composer\Config\DefaultEditorConfigProvider;
 use Symkit\BundleAiKit\Composer\Context\DefaultSyncContextResolver;
 use Symkit\BundleAiKit\Composer\Contract\SyncContextResolverInterface;
 use Symkit\BundleAiKit\Composer\Installer\AiRulesInstaller;
 
 /**
- * Composer plugin: syncs AI rules/skills into project .cursor/, .claude/, .windsurf/.
- * Delegates context resolution (SRP) and sync (SRP) to injected abstractions (DIP).
+ * Composer plugin: syncs AI kit into project `.cursor/` and `AGENTS.md`.
  */
 final class Plugin implements PluginInterface, Capable, EventSubscriberInterface
 {
@@ -27,7 +25,7 @@ final class Plugin implements PluginInterface, Capable, EventSubscriberInterface
         ?AiRulesInstaller $installer = null,
     ) {
         $this->contextResolver = $contextResolver ?? DefaultSyncContextResolver::forBundleAiKit();
-        $this->installer = $installer ?? new AiRulesInstaller(DefaultEditorConfigProvider::create());
+        $this->installer = $installer ?? new AiRulesInstaller();
     }
 
     private readonly SyncContextResolverInterface $contextResolver;

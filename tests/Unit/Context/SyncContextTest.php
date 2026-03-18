@@ -13,25 +13,18 @@ final class SyncContextTest extends TestCase
     #[Test]
     public function constructionAndPropertyAccess(): void
     {
-        $context = new SyncContext(
-            '/path/to/package',
-            '/path/to/project',
-            ['cursor', 'claude'],
-            ['symfony-bundle-core'],
-        );
+        $context = new SyncContext('/pkg', '/root', ['a', 'b']);
 
-        self::assertSame('/path/to/package', $context->packagePath);
-        self::assertSame('/path/to/project', $context->projectRoot);
-        self::assertSame(['cursor', 'claude'], $context->editors);
-        self::assertSame(['symfony-bundle-core'], $context->skills);
+        self::assertSame('/pkg', $context->packagePath);
+        self::assertSame('/root', $context->projectRoot);
+        self::assertSame(['a', 'b'], $context->skills);
     }
 
     #[Test]
-    public function constructionWithEmptyArrays(): void
+    public function emptySkills(): void
     {
-        $context = new SyncContext('/pkg', '/root', [], []);
+        $context = new SyncContext('/pkg', '/root', []);
 
-        self::assertSame([], $context->editors);
         self::assertSame([], $context->skills);
     }
 }

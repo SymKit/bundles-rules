@@ -8,20 +8,10 @@ deptrac:
         - type: directory
           value: src/Composer/Contract/.*
 
-    - name: Config
-      collectors:
-        - type: directory
-          value: src/Composer/Config/.*
-
     - name: Context
       collectors:
         - type: directory
           value: src/Composer/Context/.*
-
-    - name: Converter
-      collectors:
-        - type: directory
-          value: src/Composer/Converter/.*
 
     - name: Installer
       collectors:
@@ -35,22 +25,13 @@ deptrac:
 
   ruleset:
     Contract:
-      - Config
       - Context
-    Converter:
-      - Contract
-    Config:
-      - Contract
-      - Converter
     Context:
       - Contract
     Installer:
       - Contract
-      - Config
       - Context
     Root:
       - Contract
-      - Config
       - Context
-      - Converter
       - Installer

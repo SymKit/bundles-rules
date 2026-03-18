@@ -1,94 +1,25 @@
 ---
-description: Composer plugin architecture, SOLID principles, multi-editor AI rules sync
+description: Composer plugin symkit/bundle-ai-kit — Cursor-only sync
 alwaysApply: true
 ---
 
-# Composer Plugin Conventions — symkit/bundle-ai-kit
+# Composer Plugin — symkit/bundle-ai-kit
 
-## Project Identity
-
-- Composer plugin (`"type": "composer-plugin"`) named `symkit/bundle-ai-kit`
-- Installs AI rules, skills, `AGENTS.md`, and `ai/cursor/agents/*.md` into consumer projects
-- Single source of truth: `ai/cursor/rules/`, `ai/cursor/skills/`, `ai/AGENTS.md`, `ai/cursor/agents/`
-- Runtime conversion from `.mdc` (Cursor) to `.md` (Claude, Windsurf, Antigravity) via `FrontmatterConverter`
-- Config read from consumer's `extra.bundle-ai-kit` in `composer.json`
-
-## Architecture — SOLID by Design
+- Sync **Cursor** : `.cursor/rules`, `.cursor/skills/*`, `.cursor/agents`, `AGENTS.md`
+- Pas de couche « éditeur » : chemins fixes dans `AiRulesInstaller`
+- **Contract** : `SyncContextResolverInterface` uniquement
+- **Context** : `DefaultSyncContextResolver`, `SkillNamesDiscoverer`, `SyncContext`
+- **Installer** : `AiRulesInstaller`
 
 ```
 src/Composer/
-├── Plugin.php                          # Entry point (Composer hooks)
-├── Contract/                           # Interfaces (DIP)
-│   ├── ContentConverterInterface.php
-│   ├── EditorConfigProviderInterface.php
-│   └── SyncContextResolverInterface.php
-├── Config/                             # Editor config value objects
-│   ├── EditorConfig.php
-│   └── DefaultEditorConfigProvider.php
-├── Context/                            # Sync context resolution
+├── Plugin.php
+├── Contract/SyncContextResolverInterface.php
+├── Context/
 │   ├── SyncContext.php
-│   └── DefaultSyncContextResolver.php
-├── Converter/                          # Content conversion strategies
-│   ├── FrontmatterConverter.php
-│   ├── ClaudeFormatConverter.php
-│   ├── WindsurfFormatConverter.php
-│   ├── AntigravityFormatConverter.php
-│   └── IdentityConverter.php
-└── Installer/                          # File sync engine
-    └── AiRulesInstaller.php
+│   ├── DefaultSyncContextResolver.php
+│   └── SkillNamesDiscoverer.php
+└── Installer/AiRulesInstaller.php
 ```
 
-## SOLID
-
-- **S**: Plugin only wires events. Resolver only resolves context. Installer only syncs files. Converters only transform content.
-- **O**: New editor = new `ContentConverterInterface` + new entry in `EditorConfigProviderInterface`. Installer untouched.
-- **L**: Any `ContentConverterInterface` implementation is substitutable (Identity, Claude, Windsurf, Antigravity).
-- **I**: Three focused interfaces: `ContentConverterInterface` (convert), `EditorConfigProviderInterface` (get config), `SyncContextResolverInterface` (resolve context).
-- **D**: `AiRulesInstaller` depends on `EditorConfigProviderInterface`, not on `DefaultEditorConfigProvider`. `Plugin` depends on `SyncContextResolverInterface`, not on `DefaultSyncContextResolver`.
-
-## Composer Plugin API
-
-- Plugin implements `PluginInterface`, `Capable`, `EventSubscriberInterface`
-- Hooks: `POST_INSTALL_CMD`, `POST_UPDATE_CMD` → `syncAiFiles()`
-- Composer instantiates Plugin with no args → constructor uses optional parameters with defaults
-- Package resolution: iterate `$localRepo->getPackages()` to find self by `PACKAGE_NAME`
-- Project root: `realpath($vendorDir . '/..')`
-
-## Multi-Editor Support
-
-| Editor   | Rules | Skills | Agents | Rules format |
-|----------|-------|--------|--------|--------------|
-| Cursor   | `.cursor/rules/` | `.cursor/skills/{name}/` | `.cursor/agents/` | `.mdc` |
-| Claude   | `.claude/rules/` | `.claude/rules/skills/{name}/` | `.claude/agents/` | `.md` |
-| Windsurf | `.windsurf/rules/` | `.windsurf/rules/skills/{name}/` | `.windsurf/agents/` | `.md` |
-| Antigravity | `.agent/rules/` | `.agent/rules/skills/{name}/` | `.agent/agents/` | `.md` |
-
-Also: `ai/AGENTS.md` → project root `AGENTS.md` (once per sync).
-
-Default: `editors: ["cursor"]`. User opts in via `extra.bundle-ai-kit.editors`.
-
-## Value Objects
-
-- `EditorConfig`: readonly, holds rulesDir, skillsDir, fileExtension, ?ContentConverterInterface, ?agentsDir
-- `SyncContext`: readonly, holds packagePath, projectRoot, editors[], skills[]
-- Never mutate after construction. No setters.
-
-## Dependencies
-
-- `php: >=8.2`, `composer-plugin-api: ^2.0 || ^3.0`
-- Zero runtime dependencies beyond Composer
-- Dev: PHPStan, PHP-CS-Fixer, PHPUnit, Infection, Deptrac, GrumPHP
-
-## Commits
-
-Never reference the agent or any co-author (no Co-authored-by, Signed-off-by from the AI). Commit messages describe only the change. Never use `git commit --trailer`.
-
-## After Every Change — Makefile First
-
-Always use Makefile targets. Never call `vendor/bin/` directly.
-
-- `make cs-fix` — fix code style
-- `make phpstan` — static analysis
-- `make test` — run tests
-- `make quality` — full pipeline (cs-check + phpstan + deptrac + lint + test + infection)
-- `make ci` — security-check + quality
+`make cs-fix`, `make phpstan`, `make test`, `make quality`

@@ -34,7 +34,7 @@ Do not add Co-authored-by, Signed-off-by from the AI, or `git commit --trailer`.
 - No `mixed` without justification
 - `@param array{key: type}` for shaped arrays
 - `@param list<string>` for indexed string arrays
-- Fully typed return values: `?EditorConfig`, `?SyncContext`
+- Fully typed return values: `?SyncContext`
 
 ## PHP-CS-Fixer
 
@@ -73,7 +73,14 @@ grumphp:
             test_framework: phpunit
 ```
 
-> **Deptrac via `make` task**: Use the GrumPHP `make` task with `task: deptrac` to delegate to the Makefile target. This avoids needing a separate shell script.
+> **Deptrac + GrumPHP**: La tâche native `deptrac` charge Deptrac **dans le même processus** que GrumPHP → conflit `ComposerAutoloaderInit*` avec le `vendor/` embarqué de `deptrac/deptrac`. Garder la clé `deptrac` (affichage hook) en redirigeant vers `make` :
+>
+> ```yaml
+> deptrac:
+>     metadata:
+>         task: make
+>     task: deptrac
+> ```
 
 ## Deptrac
 
@@ -85,18 +92,10 @@ layers:
     collectors:
       - type: directory
         value: src/Composer/Contract/.*
-  - name: Config
-    collectors:
-      - type: directory
-        value: src/Composer/Config/.*
   - name: Context
     collectors:
       - type: directory
         value: src/Composer/Context/.*
-  - name: Converter
-    collectors:
-      - type: directory
-        value: src/Composer/Converter/.*
   - name: Installer
     collectors:
       - type: directory
@@ -106,15 +105,11 @@ layers:
       - type: directory
         value: src/Composer/[^/]*
 ruleset:
-    Contract: [Config, Context]
-  Converter: [Contract]
-  Config: [Contract, Converter]
+  Contract: [Context]
   Context: [Contract]
-  Installer: [Contract, Config, Context]
-  Root: [Contract, Config, Context, Converter, Installer]
+  Installer: [Contract, Context]
+  Root: [Contract, Context, Installer]
 ```
-
-Rules: Contract depends on Config and Context (interfaces reference value objects in return types). Converter depends only on Contract. Config depends on Contract + Converter. Installer never reaches into Converter directly — only through EditorConfig.contentConverter.
 
 ## Infection
 

@@ -4,13 +4,10 @@ declare(strict_types=1);
 
 namespace Symkit\BundleAiKit\Composer\Installer;
 
-use Symkit\BundleAiKit\Composer\Config\EditorConfig;
 use Symkit\BundleAiKit\Composer\Context\SyncContext;
-use Symkit\BundleAiKit\Composer\Contract\EditorConfigProviderInterface;
 
 /**
- * Syncs AI rules, optional skills, AGENTS.md, and agent prompts from package source to the project.
- * Depends on EditorConfigProviderInterface for editor-specific paths and conversion (DIP).
+ * Syncs Cursor rules (.mdc), all skills, AGENTS.md, and .cursor/agents from the package.
  */
 final class AiRulesInstaller
 {
@@ -19,10 +16,9 @@ final class AiRulesInstaller
     private const SOURCE_AGENTS = '/ai/cursor/agents';
     private const SOURCE_AGENTS_MD = '/ai/AGENTS.md';
 
-    public function __construct(
-        private readonly EditorConfigProviderInterface $editorConfigProvider,
-    ) {
-    }
+    private const DEST_RULES = '.cursor/rules';
+    private const DEST_SKILLS = '.cursor/skills';
+    private const DEST_AGENTS = '.cursor/agents';
 
     public function sync(SyncContext $context): void
     {
@@ -30,35 +26,28 @@ final class AiRulesInstaller
         $skillsSource = $context->packagePath.self::SOURCE_SKILLS;
         $agentsSource = $context->packagePath.self::SOURCE_AGENTS;
         $agentsMdSource = $context->packagePath.self::SOURCE_AGENTS_MD;
+        $root = $context->projectRoot;
 
-        $this->syncAgentsMd($agentsMdSource, $context->projectRoot.'/AGENTS.md');
+        $this->syncAgentsMd($agentsMdSource, $root.'/AGENTS.md');
 
-        foreach ($context->editors as $editor) {
-            $config = $this->editorConfigProvider->get($editor);
-            if (null === $config) {
+        $projectRulesDir = $root.'/'.self::DEST_RULES;
+        if (is_dir($rulesSource)) {
+            $this->mergeDirectory($rulesSource, $projectRulesDir);
+        }
+
+        foreach ($context->skills as $skillName) {
+            if ('' === $skillName) {
                 continue;
             }
-
-            $projectRulesDir = $context->projectRoot.'/'.$config->rulesDir;
-            if (is_dir($rulesSource)) {
-                $this->mergeDirectory($rulesSource, $projectRulesDir, $config);
+            $skillSource = $skillsSource.'/'.$skillName;
+            $projectSkillDir = $root.'/'.self::DEST_SKILLS.'/'.$skillName;
+            if (is_dir($skillSource)) {
+                $this->mergeDirectory($skillSource, $projectSkillDir);
             }
+        }
 
-            foreach ($context->skills as $skillName) {
-                if ('' === $skillName) {
-                    continue;
-                }
-                $skillSource = $skillsSource.'/'.$skillName;
-                $projectSkillDir = $context->projectRoot.'/'.$config->skillsDir.'/'.$skillName;
-                if (is_dir($skillSource)) {
-                    $this->mergeDirectory($skillSource, $projectSkillDir, $config);
-                }
-            }
-
-            if (null !== $config->agentsDir && is_dir($agentsSource)) {
-                $projectAgentsDir = $context->projectRoot.'/'.$config->agentsDir;
-                $this->mergeDirectory($agentsSource, $projectAgentsDir, $config);
-            }
+        if (is_dir($agentsSource)) {
+            $this->mergeDirectory($agentsSource, $root.'/'.self::DEST_AGENTS);
         }
     }
 
@@ -73,7 +62,7 @@ final class AiRulesInstaller
         }
     }
 
-    private function mergeDirectory(string $source, string $dest, EditorConfig $config): void
+    private function mergeDirectory(string $source, string $dest): void
     {
         if (!is_dir($source)) {
             return;
@@ -100,28 +89,13 @@ final class AiRulesInstaller
                 continue;
             }
 
-            $targetRelativePath = $relativePath;
-            $isMdc = str_ends_with($relativePath, '.mdc');
-
-            if ($isMdc && 'mdc' !== $config->fileExtension) {
-                $targetRelativePath = substr($relativePath, 0, -4).'.'.$config->fileExtension;
-            }
-
-            $targetPath = $dest.'/'.$targetRelativePath;
+            $targetPath = $dest.'/'.$relativePath;
             $targetDir = \dirname($targetPath);
             if (!is_dir($targetDir)) {
                 mkdir($targetDir, 0o755, true);
             }
 
-            if ($isMdc && null !== $config->contentConverter) {
-                $content = file_get_contents($item->getPathname());
-                if (false === $content) {
-                    continue;
-                }
-                file_put_contents($targetPath, $config->contentConverter->convert($content));
-            } else {
-                copy($item->getPathname(), $targetPath);
-            }
+            copy($item->getPathname(), $targetPath);
         }
     }
 }

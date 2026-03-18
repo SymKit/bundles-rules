@@ -8,19 +8,18 @@ use Composer\Script\Event;
 use Symkit\BundleAiKit\Composer\Contract\SyncContextResolverInterface;
 
 /**
- * Resolves sync context from Composer script event using a fixed package name and config key.
+ * Resolves sync context: Cursor only, all skills under ai/cursor/skills/.
  */
 final readonly class DefaultSyncContextResolver implements SyncContextResolverInterface
 {
     public function __construct(
         private string $packageName,
-        private string $configKey,
     ) {
     }
 
     public static function forBundleAiKit(): self
     {
-        return new self('symkit/bundle-ai-kit', 'bundle-ai-kit');
+        return new self('symkit/bundle-ai-kit');
     }
 
     public function resolve(Event $event): ?SyncContext
@@ -56,16 +55,8 @@ final readonly class DefaultSyncContextResolver implements SyncContextResolverIn
             return null;
         }
 
-        /** @var array<string, mixed> $extra */
-        $extra = $composer->getPackage()->getExtra()[$this->configKey] ?? [];
-        $rawEditors = \is_array($extra['editors'] ?? null) ? $extra['editors'] : ['cursor'];
-        $rawSkills = \is_array($extra['skills'] ?? null) ? $extra['skills'] : [];
+        $skills = SkillNamesDiscoverer::discover($packagePath);
 
-        /** @var list<string> $editors */
-        $editors = array_values(array_filter($rawEditors, '\is_string'));
-        /** @var list<string> $skills */
-        $skills = array_values(array_filter($rawSkills, '\is_string'));
-
-        return new SyncContext($packagePath, $projectRoot, $editors, $skills);
+        return new SyncContext($packagePath, $projectRoot, $skills);
     }
 }
